@@ -1,3 +1,14 @@
+# Build output
+build/
+packages/
+Generated Files/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.vcxproj.user
+
 # Prerequisites
 *.d
 
@@ -37,5 +48,5 @@
 *.out
 *.app
 
-# debug information files
+# Debug information files
 *.dwo
