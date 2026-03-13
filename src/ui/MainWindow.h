@@ -2,6 +2,10 @@
 
 #include "pch.h"
 
+#include <memory>
+
+#include "EnvironmentPage.h"
+
 struct MainWindow
     : winrt::Microsoft::UI::Xaml::WindowT<
           MainWindow,
@@ -22,5 +26,8 @@ struct MainWindow
 
 private:
     winrt::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider m_provider;
-    winrt::Microsoft::UI::Xaml::Controls::TextBlock m_contentText;
+    winrt::Microsoft::UI::Xaml::Controls::NavigationView m_navView;
+    std::unique_ptr<EnvironmentPage> m_envPage;
+
+    winrt::Microsoft::UI::Xaml::Controls::TextBlock MakePlaceholder(winrt::hstring const& text);
 };

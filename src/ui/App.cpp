@@ -11,6 +11,11 @@ App::App() {
 
 void App::OnLaunched(
     winrt::Microsoft::UI::Xaml::LaunchActivatedEventArgs const&) {
+    // Load WinUI control theme resources (equivalent of <XamlControlsResources/>
+    // in App.xaml). Must happen before creating any WinUI controls.
+    Resources().MergedDictionaries().Append(
+        winrt::Microsoft::UI::Xaml::Controls::XamlControlsResources{});
+
     m_window = winrt::make<MainWindow>();
     m_window.Activate();
 }

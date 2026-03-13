@@ -13,11 +13,10 @@ void MainWindow::InitializeComponent() {
     SystemBackdrop(MicaBackdrop{});
 
     // -- NavigationView --------------------------------------------------
-    auto navView{NavigationView{}};
-    navView.IsSettingsVisible(false);
-    navView.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);
+    m_navView = NavigationView{};
+    m_navView.IsSettingsVisible(false);
+    m_navView.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);
 
-    // Environment (main menu, default selected)
     auto envItem{NavigationViewItem{}};
     envItem.Content(winrt::box_value(L"Environment"));
     auto globeIcon{FontIcon{}};
@@ -25,7 +24,6 @@ void MainWindow::InitializeComponent() {
     envItem.Icon(globeIcon);
     envItem.Tag(winrt::box_value(L"env"));
 
-    // Settings (footer)
     auto settingsItem{NavigationViewItem{}};
     settingsItem.Content(winrt::box_value(L"Settings"));
     auto settingIcon{FontIcon{}};
@@ -33,7 +31,6 @@ void MainWindow::InitializeComponent() {
     settingsItem.Icon(settingIcon);
     settingsItem.Tag(winrt::box_value(L"settings"));
 
-    // About (footer)
     auto aboutItem{NavigationViewItem{}};
     aboutItem.Content(winrt::box_value(L"About"));
     auto infoIcon{FontIcon{}};
@@ -41,38 +38,45 @@ void MainWindow::InitializeComponent() {
     aboutItem.Icon(infoIcon);
     aboutItem.Tag(winrt::box_value(L"about"));
 
-    navView.MenuItems().Append(envItem);
-    navView.FooterMenuItems().Append(settingsItem);
-    navView.FooterMenuItems().Append(aboutItem);
+    m_navView.MenuItems().Append(envItem);
+    m_navView.FooterMenuItems().Append(settingsItem);
+    m_navView.FooterMenuItems().Append(aboutItem);
 
-    // -- Content area ----------------------------------------------------
-    m_contentText = TextBlock{};
-    m_contentText.Text(L"Environment");
-    m_contentText.FontSize(24);
-    m_contentText.Margin(ThicknessHelper::FromLengths(24, 24, 24, 24));
-    m_contentText.VerticalAlignment(VerticalAlignment::Top);
-    m_contentText.HorizontalAlignment(HorizontalAlignment::Left);
+    m_envPage = std::make_unique<EnvironmentPage>();
+    m_envPage->Refresh();
+    m_navView.Content(m_envPage->Root());
+    m_navView.SelectedItem(envItem);
 
-    navView.Content(m_contentText);
-
-    // -- Selection handler -----------------------------------------------
-    navView.SelectionChanged(
+    m_navView.SelectionChanged(
         [this](NavigationView const&,
                NavigationViewSelectionChangedEventArgs const& args) {
-            if (auto item{args.SelectedItem().try_as<NavigationViewItem>()}) {
-                auto tag{winrt::unbox_value<winrt::hstring>(item.Tag())};
-                if (tag == L"env") {
-                    m_contentText.Text(L"Environment");
-                } else if (tag == L"settings") {
-                    m_contentText.Text(L"Settings");
-                } else if (tag == L"about") {
-                    m_contentText.Text(L"About");
-                }
+            auto item{args.SelectedItem()
+                          .as<NavigationViewItem>()};
+            auto tag{winrt::unbox_value<winrt::hstring>(item.Tag())};
+            if (tag == L"env") {
+                m_navView.Content(m_envPage->Root());
+            } else if (tag == L"settings") {
+                m_navView.Content(MakePlaceholder(L"Settings — coming soon"));
+            } else if (tag == L"about") {
+                m_navView.Content(MakePlaceholder(L"About — coming soon"));
             }
         });
 
-    navView.SelectedItem(envItem);
-    Content(navView);
+    Content(m_navView);
+}
+
+winrt::Microsoft::UI::Xaml::Controls::TextBlock
+MainWindow::MakePlaceholder(winrt::hstring const& text) {
+    using namespace winrt::Microsoft::UI::Xaml;
+    using namespace winrt::Microsoft::UI::Xaml::Controls;
+
+    auto tb{TextBlock{}};
+    tb.Text(text);
+    tb.FontSize(24);
+    tb.Margin(ThicknessHelper::FromLengths(24, 24, 24, 24));
+    tb.VerticalAlignment(VerticalAlignment::Top);
+    tb.HorizontalAlignment(HorizontalAlignment::Left);
+    return tb;
 }
 
 winrt::Microsoft::UI::Xaml::Markup::IXamlType
