@@ -1,21 +1,21 @@
 #include "EnvironmentPage.h"
 
-#include <format>
-
 using namespace winrt::Microsoft::UI::Xaml;
 using namespace winrt::Microsoft::UI::Xaml::Controls;
 using namespace winrt::Microsoft::UI::Xaml::Media;
+
+EnvironmentPage::EnvironmentPage() {
+    m_root = Grid{};
+    m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
+    m_root.RowSpacing(16);
+    Refresh();
+}
 
 winrt::Microsoft::UI::Xaml::UIElement EnvironmentPage::Root() const {
     return m_root;
 }
 
 void EnvironmentPage::Refresh() {
-    if (!m_root) {
-        m_root = Grid{};
-        m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
-        m_root.RowSpacing(16);
-    }
     m_root.Children().Clear();
     m_root.RowDefinitions().Clear();
 
@@ -27,12 +27,12 @@ void EnvironmentPage::Refresh() {
     m_root.RowDefinitions().Append(userRow);
     m_root.RowDefinitions().Append(machineRow);
 
-    auto userPanel{StackPanel{}};
+    auto userPanel{Grid{}};
     BuildPanel(Environ::core::Scope::User, userPanel);
     Grid::SetRow(userPanel, 0);
     m_root.Children().Append(userPanel);
 
-    auto machinePanel{StackPanel{}};
+    auto machinePanel{Grid{}};
     BuildPanel(Environ::core::Scope::Machine, machinePanel);
     Grid::SetRow(machinePanel, 1);
     m_root.Children().Append(machinePanel);
@@ -40,9 +40,17 @@ void EnvironmentPage::Refresh() {
 
 void EnvironmentPage::BuildPanel(
     Environ::core::Scope scope,
-    StackPanel const& parent) {
+    Grid const& parent) {
 
     auto vars{Environ::core::read_variables(scope)};
+
+    parent.RowDefinitions().Clear();
+    auto headerRow{RowDefinition{}};
+    headerRow.Height(GridLengthHelper::Auto());
+    auto contentRow{RowDefinition{}};
+    contentRow.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    parent.RowDefinitions().Append(headerRow);
+    parent.RowDefinitions().Append(contentRow);
 
     // Header row: "User Variables  [count]"
     auto headerPanel{StackPanel{}};
@@ -66,6 +74,7 @@ void EnvironmentPage::BuildPanel(
 
     headerPanel.Children().Append(headerText);
     headerPanel.Children().Append(countBadge);
+    Grid::SetRow(headerPanel, 0);
     parent.Children().Append(headerPanel);
 
     // ScrollViewer with variable rows
@@ -93,19 +102,35 @@ void EnvironmentPage::BuildPanel(
         nameBlock.Text(var.name);
         nameBlock.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
         nameBlock.TextTrimming(TextTrimming::CharacterEllipsis);
+        nameBlock.VerticalAlignment(VerticalAlignment::Top);
         Grid::SetColumn(nameBlock, 0);
 
-        auto valueBlock{TextBlock{}};
-        valueBlock.Text(var.value);
-        valueBlock.TextTrimming(TextTrimming::CharacterEllipsis);
-        valueBlock.Opacity(0.8);
-        Grid::SetColumn(valueBlock, 1);
+        auto valuePanel{StackPanel{}};
+        valuePanel.Spacing(4);
+        Grid::SetColumn(valuePanel, 1);
+
+        if (var.kind == Environ::core::EnvVariableKind::PathList) {
+            for (const auto& segment : var.segments) {
+                auto valueBlock{TextBlock{}};
+                valueBlock.Text(segment);
+                valueBlock.TextWrapping(TextWrapping::Wrap);
+                valueBlock.Opacity(0.8);
+                valuePanel.Children().Append(valueBlock);
+            }
+        } else {
+            auto valueBlock{TextBlock{}};
+            valueBlock.Text(var.value);
+            valueBlock.TextTrimming(TextTrimming::CharacterEllipsis);
+            valueBlock.Opacity(0.8);
+            valuePanel.Children().Append(valueBlock);
+        }
 
         row.Children().Append(nameBlock);
-        row.Children().Append(valueBlock);
+        row.Children().Append(valuePanel);
         rowsPanel.Children().Append(row);
     }
 
     scrollViewer.Content(rowsPanel);
+    Grid::SetRow(scrollViewer, 1);
     parent.Children().Append(scrollViewer);
 }

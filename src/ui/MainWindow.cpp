@@ -43,7 +43,6 @@ void MainWindow::InitializeComponent() {
     m_navView.FooterMenuItems().Append(aboutItem);
 
     m_envPage = std::make_unique<EnvironmentPage>();
-    m_envPage->Refresh();
     m_navView.Content(m_envPage->Root());
     m_navView.SelectedItem(envItem);
 

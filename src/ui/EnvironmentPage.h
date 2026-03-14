@@ -5,6 +5,8 @@
 
 class EnvironmentPage {
 public:
+    EnvironmentPage();
+
     winrt::Microsoft::UI::Xaml::UIElement Root() const;
     void Refresh();
 
@@ -13,5 +15,5 @@ private:
 
     void BuildPanel(
         Environ::core::Scope scope,
-        winrt::Microsoft::UI::Xaml::Controls::StackPanel const& parent);
+        winrt::Microsoft::UI::Xaml::Controls::Grid const& parent);
 };
