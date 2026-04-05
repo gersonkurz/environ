@@ -29,6 +29,10 @@ std::vector<EnvChange> compute_diff(
 // Returns empty string on success, or an error message on failure.
 std::wstring apply_changes(Scope scope, std::vector<EnvChange> const& changes);
 
+// Generate a human-readable summary label from a list of changes.
+// E.g. "Modify GOPATH" or "Modify PATH, Add NEWVAR (+1 more)"
+std::wstring summarize_changes(std::vector<EnvChange> const& changes);
+
 // Broadcast WM_SETTINGCHANGE so other processes pick up environment changes.
 void broadcast_environment_change();
 

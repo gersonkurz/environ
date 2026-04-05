@@ -48,17 +48,64 @@ std::wstring delete_registry_value(HKEY hkey, std::wstring const& name) {
 } // namespace
 
 std::wstring EnvChange::describe() const {
+    // Truncate long values for display
+    auto truncate = [](std::wstring_view s, std::size_t max_len = 60) -> std::wstring {
+        if (s.size() <= max_len) return std::wstring{s};
+        return std::wstring{s.substr(0, max_len)} + L"\u2026";
+    };
+
     switch (kind) {
     case Kind::Add:
-        return std::format(L"Add '{}' = '{}'", name, value);
+        return std::format(L"Add '{}' = '{}'", name, truncate(value));
     case Kind::Modify:
-        return std::format(L"Modify '{}'", name);
+        return std::format(L"Modify '{}' to '{}'", name, truncate(value));
     case Kind::Delete:
         return std::format(L"Delete '{}'", name);
     case Kind::Rename:
-        return std::format(L"Rename '{}' \u2192 '{}'", old_name, name);
+        return std::format(L"Rename '{}' \u2192 '{}' = '{}'", old_name, name, truncate(value));
     }
     return {};
+}
+
+std::wstring summarize_changes(std::vector<EnvChange> const& changes) {
+    if (changes.empty()) return L"No changes";
+
+    auto truncate = [](std::wstring_view s, std::size_t max_len = 40) -> std::wstring {
+        if (s.size() <= max_len) return std::wstring{s};
+        return std::wstring{s.substr(0, max_len)} + L"\u2026";
+    };
+
+    std::vector<std::wstring> parts;
+    for (const auto& c : changes) {
+        switch (c.kind) {
+        case EnvChange::Kind::Add:
+            parts.push_back(std::format(L"Add {}", c.name));
+            break;
+        case EnvChange::Kind::Modify:
+            parts.push_back(std::format(L"Modify {}", c.name));
+            break;
+        case EnvChange::Kind::Delete:
+            parts.push_back(std::format(L"Delete {}", c.name));
+            break;
+        case EnvChange::Kind::Rename:
+            parts.push_back(std::format(L"Rename {} \u2192 {}", c.old_name, c.name));
+            break;
+        }
+    }
+
+    // For a single change, include the value
+    if (parts.size() == 1) {
+        const auto& c{changes[0]};
+        if (c.kind == EnvChange::Kind::Modify) {
+            return std::format(L"Modify {} to '{}'", c.name, truncate(c.value));
+        }
+        if (c.kind == EnvChange::Kind::Add) {
+            return std::format(L"Add {} = '{}'", c.name, truncate(c.value));
+        }
+        return parts[0];
+    }
+    if (parts.size() == 2) return parts[0] + L", " + parts[1];
+    return std::format(L"{}, {} (+{} more)", parts[0], parts[1], parts.size() - 2);
 }
 
 std::vector<EnvChange> compute_diff(

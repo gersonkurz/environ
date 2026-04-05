@@ -1,6 +1,8 @@
 #include "EnvironmentPage.h"
 #include "../core/EnvWriter.h"
 
+#include <pnq/unicode.h>
+
 #include <algorithm>
 
 using namespace winrt::Microsoft::UI::Xaml;
@@ -646,9 +648,37 @@ void EnvironmentPage::OnHistory() {
         return;
     }
 
+    // Two-part layout: snapshot list (top) + change details (bottom)
+    auto outer{Grid{}};
+    outer.MinWidth(500);
+    auto list_row{RowDefinition{}};
+    list_row.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    auto detail_row{RowDefinition{}};
+    detail_row.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    outer.RowDefinitions().Append(list_row);
+    outer.RowDefinitions().Append(detail_row);
+
+    // Change detail panel (bottom) — updated when a snapshot is clicked
+    auto detail_panel{StackPanel{}};
+    detail_panel.Spacing(2);
+
+    auto detail_header{TextBlock{}};
+    detail_header.Text(L"Select a snapshot to see changes");
+    detail_header.FontSize(12);
+    detail_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    detail_header.FontStyle(winrt::Windows::UI::Text::FontStyle::Italic);
+    detail_panel.Children().Append(detail_header);
+
+    auto detail_scroll{ScrollViewer{}};
+    detail_scroll.MaxHeight(150);
+    detail_scroll.Content(detail_panel);
+    detail_scroll.Margin(ThicknessHelper::FromLengths(0, 8, 0, 0));
+    Grid::SetRow(detail_scroll, 1);
+    outer.Children().Append(detail_scroll);
+
+    // Snapshot list (top)
     auto list_panel{StackPanel{}};
     list_panel.Spacing(4);
-    list_panel.MinWidth(400);
 
     for (const auto& snap : snapshots) {
         auto row{Grid{}};
@@ -675,6 +705,32 @@ void EnvironmentPage::OnHistory() {
         label_text.FontSize(12);
         label_text.VerticalAlignment(VerticalAlignment::Center);
         Grid::SetColumn(label_text, 1);
+
+        // Clicking the row shows change details
+        auto row_border{Border{}};
+        row_border.Padding(ThicknessHelper::FromLengths(4, 2, 4, 2));
+        row_border.CornerRadius(CornerRadiusHelper::FromUniformRadius(4));
+        row_border.Tapped([this, detail_panel, snapshot_id = snap.id](
+                              [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                              [[maybe_unused]] winrt::Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const& args) {
+            detail_panel.Children().Clear();
+
+            auto header{TextBlock{}};
+            header.Text(L"Changes in this snapshot:");
+            header.FontSize(12);
+            header.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+            header.Margin(ThicknessHelper::FromLengths(0, 0, 0, 4));
+            detail_panel.Children().Append(header);
+
+            auto changes{m_snapshotStore.describe_snapshot_changes(snapshot_id)};
+            for (const auto& desc : changes) {
+                auto line{TextBlock{}};
+                line.Text(desc);
+                line.FontSize(12);
+                line.TextWrapping(TextWrapping::Wrap);
+                detail_panel.Children().Append(line);
+            }
+        });
 
         auto restore_btn{Button{}};
         restore_btn.Content(winrt::box_value(L"Restore"));
@@ -705,10 +761,12 @@ void EnvironmentPage::OnHistory() {
                                            [[maybe_unused]] ContentDialogButtonClickEventArgs const& a) {
                 auto snap_vars{m_snapshotStore.load_snapshot(snapshot_id)};
 
-                // Safety snapshot of current state
+                // Safety snapshot — only if current state differs from latest snapshot
                 auto fresh_user{Environ::core::read_variables(Environ::core::Scope::User)};
                 auto fresh_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
-                m_snapshotStore.create_snapshot("Auto (pre-restore)", fresh_user, fresh_machine);
+                if (!m_snapshotStore.matches_latest_snapshot(fresh_user, fresh_machine)) {
+                    m_snapshotStore.create_snapshot("Auto (pre-restore)", fresh_user, fresh_machine);
+                }
 
                 // Split snapshot into user/machine
                 std::vector<Environ::core::EnvVariable> snap_user;
@@ -767,13 +825,17 @@ void EnvironmentPage::OnHistory() {
         row.Children().Append(ts_text);
         row.Children().Append(label_text);
         row.Children().Append(restore_btn);
-        list_panel.Children().Append(row);
+        row_border.Child(row);
+        list_panel.Children().Append(row_border);
     }
 
-    auto scroll{ScrollViewer{}};
-    scroll.MaxHeight(400);
-    scroll.Content(list_panel);
-    dlg.Content(scroll);
+    auto list_scroll{ScrollViewer{}};
+    list_scroll.MaxHeight(200);
+    list_scroll.Content(list_panel);
+    Grid::SetRow(list_scroll, 0);
+    outer.Children().Append(list_scroll);
+
+    dlg.Content(outer);
     dlg.ShowAsync();
 }
 
@@ -795,16 +857,42 @@ void EnvironmentPage::OnSave() {
         return;
     }
 
-    // 2. Dry-run review dialog
+    // 2. Dry-run review dialog with editable snapshot label
+    auto all_changes{user_changes};
+    all_changes.insert(all_changes.end(), machine_changes.begin(), machine_changes.end());
+    auto suggested_label{Environ::core::summarize_changes(all_changes)};
+
+    auto outer_panel{StackPanel{}};
+    outer_panel.Spacing(8);
+    outer_panel.MaxWidth(500);
+
+    // Snapshot label field
+    auto label_header{TextBlock{}};
+    label_header.Text(L"Snapshot label:");
+    label_header.FontSize(12);
+    label_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    outer_panel.Children().Append(label_header);
+
+    auto label_box{TextBox{}};
+    label_box.Text(suggested_label);
+    label_box.PlaceholderText(L"Describe this change...");
+    outer_panel.Children().Append(label_box);
+
+    // Change list
+    auto changes_header{TextBlock{}};
+    changes_header.Text(L"Changes to apply:");
+    changes_header.FontSize(12);
+    changes_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    changes_header.Margin(ThicknessHelper::FromLengths(0, 4, 0, 0));
+    outer_panel.Children().Append(changes_header);
+
     auto review_panel{StackPanel{}};
     review_panel.Spacing(4);
-    review_panel.MaxWidth(500);
 
     if (!user_changes.empty()) {
         auto scope_label{TextBlock{}};
         scope_label.Text(L"User scope:");
         scope_label.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-        scope_label.Margin(ThicknessHelper::FromLengths(0, 4, 0, 2));
         review_panel.Children().Append(scope_label);
 
         for (const auto& c : user_changes) {
@@ -819,7 +907,7 @@ void EnvironmentPage::OnSave() {
         auto scope_label{TextBlock{}};
         scope_label.Text(L"Machine scope:");
         scope_label.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-        scope_label.Margin(ThicknessHelper::FromLengths(0, 8, 0, 2));
+        scope_label.Margin(ThicknessHelper::FromLengths(0, 4, 0, 0));
         review_panel.Children().Append(scope_label);
 
         for (const auto& c : machine_changes) {
@@ -831,19 +919,23 @@ void EnvironmentPage::OnSave() {
     }
 
     auto scroll{ScrollViewer{}};
-    scroll.MaxHeight(300);
+    scroll.MaxHeight(250);
     scroll.Content(review_panel);
+    outer_panel.Children().Append(scroll);
 
     auto review_dlg{ContentDialog{}};
     review_dlg.Title(winrt::box_value(L"Review Changes"));
-    review_dlg.Content(scroll);
+    review_dlg.Content(outer_panel);
     review_dlg.PrimaryButtonText(L"Apply");
     review_dlg.CloseButtonText(L"Cancel");
     review_dlg.XamlRoot(m_root.XamlRoot());
 
-    review_dlg.PrimaryButtonClick([this, user_changes, machine_changes](
+    review_dlg.PrimaryButtonClick([this, user_changes, machine_changes, label_box](
                                       [[maybe_unused]] ContentDialog const& sender,
                                       [[maybe_unused]] ContentDialogButtonClickEventArgs const& args) {
+        auto label{pnq::unicode::to_utf8(std::wstring{label_box.Text()})};
+        if (label.empty()) label = "Save";
+
         // 3. Conflict detection: re-read registry and compare with our baseline
         auto fresh_user{Environ::core::read_variables(Environ::core::Scope::User)};
         bool conflict{false};
@@ -863,8 +955,8 @@ void EnvironmentPage::OnSave() {
             }
         }
 
+        auto fresh_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
         if (m_elevated) {
-            auto fresh_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
             if (fresh_machine.size() != m_originalMachineVariables.size()) {
                 conflict = true;
                 conflict_details += L"Number of Machine variables changed externally.\n";
@@ -881,6 +973,10 @@ void EnvironmentPage::OnSave() {
         }
 
         if (conflict) {
+            // External changes detected — snapshot the unexpected state before overwriting
+            m_snapshotStore.create_snapshot("Auto (external changes detected)",
+                fresh_user, fresh_machine);
+
             auto conflict_dlg{ContentDialog{}};
             conflict_dlg.Title(winrt::box_value(L"External Changes Detected"));
             auto conflict_text{TextBlock{}};
@@ -891,12 +987,9 @@ void EnvironmentPage::OnSave() {
             conflict_dlg.CloseButtonText(L"Cancel");
             conflict_dlg.XamlRoot(m_root.XamlRoot());
 
-            conflict_dlg.PrimaryButtonClick([this, user_changes, machine_changes](
+            conflict_dlg.PrimaryButtonClick([this, user_changes, machine_changes, label](
                                                 [[maybe_unused]] ContentDialog const& s,
                                                 [[maybe_unused]] ContentDialogButtonClickEventArgs const& a) {
-                // Auto-snapshot before overwriting
-                m_snapshotStore.create_snapshot("Auto (pre-save)",
-                    m_originalUserVariables, m_originalMachineVariables);
                 std::wstring errors;
                 if (!user_changes.empty()) {
                     errors += Environ::core::apply_changes(Environ::core::Scope::User, user_changes);
@@ -909,6 +1002,11 @@ void EnvironmentPage::OnSave() {
                     }
                 }
                 Environ::core::broadcast_environment_change();
+
+                // Snapshot the new state (what the user chose)
+                auto new_user{Environ::core::read_variables(Environ::core::Scope::User)};
+                auto new_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
+                m_snapshotStore.create_snapshot(label, new_user, new_machine);
 
                 if (!errors.empty()) {
                     auto err_dlg{ContentDialog{}};
@@ -928,9 +1026,7 @@ void EnvironmentPage::OnSave() {
             return;
         }
 
-        // 4. No conflict — auto-snapshot then apply
-        m_snapshotStore.create_snapshot("Auto (pre-save)",
-            m_originalUserVariables, m_originalMachineVariables);
+        // 4. No conflict — apply, then snapshot the result
         std::wstring errors;
         if (!user_changes.empty()) {
             errors += Environ::core::apply_changes(Environ::core::Scope::User, user_changes);
@@ -943,6 +1039,11 @@ void EnvironmentPage::OnSave() {
             }
         }
         Environ::core::broadcast_environment_change();
+
+        // Snapshot the new state with the user's label
+        auto new_user{Environ::core::read_variables(Environ::core::Scope::User)};
+        auto new_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
+        m_snapshotStore.create_snapshot(label, new_user, new_machine);
 
         if (!errors.empty()) {
             auto err_dlg{ContentDialog{}};

@@ -245,4 +245,104 @@ int SnapshotStore::prune_older_than(int days) {
     return deleted;
 }
 
+std::vector<std::wstring> SnapshotStore::describe_snapshot_changes(int64_t snapshot_id) {
+    std::vector<std::wstring> result;
+    if (!m_impl) return result;
+
+    // Find the previous snapshot
+    pnq::sqlite::Statement prev_stmt{m_impl->db,
+        "SELECT id FROM snapshots WHERE id < ? ORDER BY id DESC LIMIT 1;"};
+    prev_stmt.bind(snapshot_id);
+
+    auto current_vars{load_snapshot(snapshot_id)};
+
+    // Build name→value maps for current snapshot (keyed by "scope:name")
+    auto make_key = [](Scope scope, std::wstring const& name) {
+        return (scope == Scope::User ? L"U:" : L"M:") + name;
+    };
+
+    std::unordered_map<std::wstring, SnapshotVariable const*> current_map;
+    for (const auto& v : current_vars) {
+        current_map[make_key(v.scope, v.name)] = &v;
+    }
+
+    if (!prev_stmt.execute()) {
+        // No predecessor — this is the first snapshot, list everything as "initial"
+        for (const auto& v : current_vars) {
+            auto scope_str{v.scope == Scope::User ? L"User" : L"Machine"};
+            result.push_back(std::format(L"[{}] {} = {}", scope_str, v.name, v.value));
+        }
+        if (result.empty()) result.push_back(L"(empty snapshot)");
+        return result;
+    }
+
+    auto prev_id{prev_stmt.get_int64(0)};
+    auto prev_vars{load_snapshot(prev_id)};
+
+    std::unordered_map<std::wstring, SnapshotVariable const*> prev_map;
+    for (const auto& v : prev_vars) {
+        prev_map[make_key(v.scope, v.name)] = &v;
+    }
+
+    // Detect adds and modifications
+    for (const auto& v : current_vars) {
+        auto key{make_key(v.scope, v.name)};
+        auto scope_str{v.scope == Scope::User ? L"User" : L"Machine"};
+        auto it{prev_map.find(key)};
+        if (it == prev_map.end()) {
+            result.push_back(std::format(L"[{}] Add '{}' = '{}'", scope_str, v.name, v.value));
+        } else if (it->second->value != v.value) {
+            result.push_back(std::format(L"[{}] Modify '{}' to '{}'", scope_str, v.name, v.value));
+        }
+    }
+
+    // Detect deletes
+    for (const auto& v : prev_vars) {
+        auto key{make_key(v.scope, v.name)};
+        if (current_map.find(key) == current_map.end()) {
+            auto scope_str{v.scope == Scope::User ? L"User" : L"Machine"};
+            result.push_back(std::format(L"[{}] Delete '{}'", scope_str, v.name));
+        }
+    }
+
+    if (result.empty()) result.push_back(L"(no changes from previous snapshot)");
+    return result;
+}
+
+bool SnapshotStore::matches_latest_snapshot(
+    std::vector<EnvVariable> const& user_vars,
+    std::vector<EnvVariable> const& machine_vars) {
+
+    if (!m_impl) return false;
+
+    // Find the most recent snapshot
+    pnq::sqlite::Statement latest{m_impl->db,
+        "SELECT id FROM snapshots ORDER BY timestamp DESC LIMIT 1;"};
+    if (!latest.execute()) return false;
+
+    auto latest_id{latest.get_int64(0)};
+    auto snap_vars{load_snapshot(latest_id)};
+
+    // Split snapshot into user/machine and build lookup maps
+    std::unordered_map<std::wstring, std::pair<std::wstring, bool>> snap_user;
+    std::unordered_map<std::wstring, std::pair<std::wstring, bool>> snap_machine;
+    for (const auto& sv : snap_vars) {
+        auto& target{sv.scope == Scope::User ? snap_user : snap_machine};
+        target[sv.name] = {sv.value, sv.is_expandable};
+    }
+
+    auto matches = [](auto const& vars, auto const& snap_map) {
+        if (vars.size() != snap_map.size()) return false;
+        for (const auto& v : vars) {
+            auto it{snap_map.find(v.name)};
+            if (it == snap_map.end()) return false;
+            if (it->second.first != v.value) return false;
+            if (it->second.second != v.is_expandable) return false;
+        }
+        return true;
+    };
+
+    return matches(user_vars, snap_user) && matches(machine_vars, snap_machine);
+}
+
 } // namespace Environ::core

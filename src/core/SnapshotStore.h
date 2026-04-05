@@ -50,6 +50,15 @@ public:
     // Delete snapshots older than the given number of days.
     int prune_older_than(int days);
 
+    // Compute what changed between this snapshot and the previous one.
+    // Returns a human-readable list of change descriptions.
+    std::vector<std::wstring> describe_snapshot_changes(int64_t snapshot_id);
+
+    // Check if the given variables match the most recent snapshot exactly.
+    bool matches_latest_snapshot(
+        std::vector<EnvVariable> const& user_vars,
+        std::vector<EnvVariable> const& machine_vars);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
