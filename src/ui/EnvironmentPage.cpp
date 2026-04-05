@@ -121,7 +121,6 @@ TextBox MakeCell(std::wstring const& text) {
 EnvironmentPage::EnvironmentPage() {
     m_root = Grid{};
     m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
-    m_scrollViewer = ScrollViewer{};
     Refresh();
 }
 
@@ -277,8 +276,25 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     // --- Scrollable content ---
     m_scrollViewer = ScrollViewer{};
     m_scrollViewer.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
-    m_scrollViewer.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+    m_scrollViewer.HorizontalScrollBarVisibility(ScrollBarVisibility::Auto);
     m_scrollViewer.Margin(ThicknessHelper::FromLengths(0, 4, 0, 0));
+    m_scrollViewer.ZoomMode(ZoomMode::Enabled);
+    m_scrollViewer.MinZoomFactor(0.5f);
+    m_scrollViewer.MaxZoomFactor(3.0f);
+
+    m_scrollViewer.PointerWheelChanged([this](winrt::Windows::Foundation::IInspectable const&,
+                                              winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+        const bool ctrl{(static_cast<uint32_t>(args.KeyModifiers()) &
+                        static_cast<uint32_t>(winrt::Windows::System::VirtualKeyModifiers::Control)) != 0};
+        if (!ctrl) return;
+
+        const auto point{args.GetCurrentPoint(m_scrollViewer)};
+        const auto delta{point.Properties().MouseWheelDelta()};
+        const auto step{static_cast<float>(delta) / 120.0f * 0.1f};
+        const auto new_zoom{std::clamp(m_scrollViewer.ZoomFactor() + step, 0.5f, 3.0f)};
+        m_scrollViewer.ChangeView(nullptr, nullptr, new_zoom);
+        args.Handled(true);
+    });
 
     auto rows_panel{StackPanel{}};
     rows_panel.Spacing(0);
@@ -502,9 +518,19 @@ void EnvironmentPage::WireScrollPassthrough(TextBox const& text_box) {
     text_box.PointerWheelChanged([this](winrt::Windows::Foundation::IInspectable const&,
                                         winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
         if (!m_scrollViewer) return;
+
         const auto point{args.GetCurrentPoint(m_scrollViewer)};
-        const auto delta{static_cast<double>(point.Properties().MouseWheelDelta())};
-        m_scrollViewer.ChangeView(nullptr, m_scrollViewer.VerticalOffset() - delta, nullptr, true);
+        const auto delta{point.Properties().MouseWheelDelta()};
+        const bool ctrl{(static_cast<uint32_t>(args.KeyModifiers()) &
+                        static_cast<uint32_t>(winrt::Windows::System::VirtualKeyModifiers::Control)) != 0};
+
+        if (ctrl) {
+            const auto step{static_cast<float>(delta) / 120.0f * 0.1f};
+            const auto new_zoom{std::clamp(m_scrollViewer.ZoomFactor() + step, 0.5f, 3.0f)};
+            m_scrollViewer.ChangeView(nullptr, nullptr, new_zoom);
+        } else {
+            m_scrollViewer.ChangeView(nullptr, m_scrollViewer.VerticalOffset() - static_cast<double>(delta), nullptr, true);
+        }
         args.Handled(true);
     });
 }
