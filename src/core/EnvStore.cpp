@@ -6,6 +6,9 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <filesystem>
+
+#include <windows.h>
 
 namespace Environ::core {
 
@@ -94,6 +97,25 @@ EnvVariableKind classify_variable(std::wstring_view value, std::vector<std::wstr
     return EnvVariableKind::Scalar;
 }
 
+std::wstring expand_env_string(std::wstring const& input) {
+    auto required{ExpandEnvironmentStringsW(input.c_str(), nullptr, 0)};
+    if (required == 0) {
+        return input;
+    }
+    std::wstring result(required, L'\0');
+    ExpandEnvironmentStringsW(input.c_str(), result.data(), required);
+    // Remove trailing null
+    if (!result.empty() && result.back() == L'\0') {
+        result.pop_back();
+    }
+    return result;
+}
+
+bool path_exists(std::wstring const& path) {
+    std::error_code ec;
+    return std::filesystem::exists(path, ec);
+}
+
 } // namespace
 
 std::vector<EnvVariable> read_variables(Scope scope) {
@@ -136,6 +158,41 @@ std::vector<EnvVariable> read_variables(Scope scope) {
                  result.size(), scope == Scope::User ? "user" : "machine");
 
     return result;
+}
+
+void expand_and_validate(std::vector<EnvVariable>& variables) {
+    for (auto& var : variables) {
+        var.expanded_value = var.is_expandable
+            ? expand_env_string(var.value)
+            : var.value;
+
+        if (var.kind == EnvVariableKind::PathList) {
+            var.expanded_segments.clear();
+            var.segment_valid.clear();
+            var.expanded_segments.reserve(var.segments.size());
+            var.segment_valid.reserve(var.segments.size());
+
+            for (const auto& seg : var.segments) {
+                auto expanded{var.is_expandable ? expand_env_string(seg) : seg};
+                var.segment_valid.push_back(path_exists(expanded));
+                var.expanded_segments.push_back(std::move(expanded));
+            }
+        }
+    }
+}
+
+bool is_elevated() {
+    BOOL elevated{FALSE};
+    HANDLE token{nullptr};
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+        TOKEN_ELEVATION elevation{};
+        DWORD size{sizeof(TOKEN_ELEVATION)};
+        if (GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size)) {
+            elevated = elevation.TokenIsElevated;
+        }
+        CloseHandle(token);
+    }
+    return elevated != FALSE;
 }
 
 } // namespace Environ::core

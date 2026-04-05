@@ -23,7 +23,10 @@ private:
     winrt::Microsoft::UI::Xaml::Controls::Border m_selectedRowBorder{nullptr};
     std::vector<Environ::core::EnvVariable> m_userVariables;
     std::vector<Environ::core::EnvVariable> m_machineVariables;
+    std::vector<Environ::core::EnvVariable> m_originalUserVariables;
+    std::vector<Environ::core::EnvVariable> m_originalMachineVariables;
     std::optional<SelectedVariable> m_selectedVariable;
+    bool m_elevated{false};
 
     void EnsureSelection();
     void BuildList(winrt::Microsoft::UI::Xaml::Controls::Grid const& parent);

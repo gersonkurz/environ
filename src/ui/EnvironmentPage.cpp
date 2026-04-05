@@ -96,7 +96,7 @@ Border MakeScopeBadge(Environ::core::Scope scope) {
     return badge;
 }
 
-TextBox MakeCell(std::wstring const& text) {
+TextBox MakeCell(std::wstring const& text, bool read_only = false) {
     auto cell{TextBox{}};
     cell.Text(text);
     cell.BorderThickness(ThicknessHelper::FromUniformLength(0));
@@ -105,6 +105,11 @@ TextBox MakeCell(std::wstring const& text) {
     cell.TextWrapping(TextWrapping::NoWrap);
     cell.AcceptsReturn(false);
     cell.VerticalAlignment(VerticalAlignment::Center);
+    cell.IsReadOnly(read_only);
+
+    if (read_only) {
+        cell.Opacity(0.5);
+    }
 
     cell.LostFocus([](winrt::Windows::Foundation::IInspectable const& sender,
                       [[maybe_unused]] RoutedEventArgs const& e) {
@@ -116,11 +121,37 @@ TextBox MakeCell(std::wstring const& text) {
     return cell;
 }
 
+Border MakeValueWrapper() {
+    auto wrapper{Border{}};
+    wrapper.BorderThickness(ThicknessHelper::FromLengths(0, 0, 0, 0));
+    return wrapper;
+}
+
+void MarkDirty(Border const& wrapper, bool dirty) {
+    if (dirty) {
+        wrapper.BorderThickness(ThicknessHelper::FromLengths(2, 0, 0, 0));
+        wrapper.BorderBrush(ThemeBrush(L"AccentFillColorDefaultBrush"));
+    } else {
+        wrapper.BorderThickness(ThicknessHelper::FromLengths(0, 0, 0, 0));
+        wrapper.BorderBrush(nullptr);
+    }
+}
+
+void ApplySegmentStyle(TextBox const& cell, bool valid, std::wstring const& tooltip) {
+    if (!valid) {
+        cell.Foreground(ThemeBrush(L"AccentTextFillColorPrimaryBrush"));
+    }
+    if (!tooltip.empty()) {
+        ToolTipService::SetToolTip(cell, winrt::box_value(winrt::hstring{tooltip}));
+    }
+}
+
 } // namespace
 
 EnvironmentPage::EnvironmentPage() {
     m_root = Grid{};
     m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
+    m_elevated = Environ::core::is_elevated();
     Refresh();
 }
 
@@ -131,6 +162,11 @@ winrt::Microsoft::UI::Xaml::UIElement EnvironmentPage::Root() const {
 void EnvironmentPage::Refresh() {
     m_userVariables = Environ::core::read_variables(Environ::core::Scope::User);
     m_machineVariables = Environ::core::read_variables(Environ::core::Scope::Machine);
+    Environ::core::expand_and_validate(m_userVariables);
+    Environ::core::expand_and_validate(m_machineVariables);
+
+    m_originalUserVariables = m_userVariables;
+    m_originalMachineVariables = m_machineVariables;
     m_selectedRowBorder = nullptr;
     EnsureSelection();
 
@@ -172,13 +208,11 @@ void EnvironmentPage::EnsureSelection() {
 
 void EnvironmentPage::SelectRow(Border const& row_border,
                                 Environ::core::Scope scope, std::size_t variable_index) {
-    // Clear previous selection
     if (m_selectedRowBorder) {
         m_selectedRowBorder.BorderThickness(ThicknessHelper::FromLengths(0, 0, 0, 0));
         m_selectedRowBorder.BorderBrush(nullptr);
     }
 
-    // Apply new selection
     m_selectedRowBorder = row_border;
     row_border.BorderThickness(ThicknessHelper::FromLengths(2, 0, 0, 0));
     row_border.BorderBrush(ThemeBrush(L"AccentFillColorDefaultBrush"));
@@ -194,7 +228,6 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     parent.RowDefinitions().Clear();
     parent.Children().Clear();
 
-    // Three rows: title, column headers, scrollable content
     auto title_row{RowDefinition{}};
     title_row.Height(GridLengthHelper::Auto());
     auto header_row{RowDefinition{}};
@@ -260,7 +293,6 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     header_grid.Children().Append(scope_header);
     header_grid.Children().Append(value_header);
 
-    // Header + separator wrapped in a StackPanel
     auto header_wrapper{StackPanel{}};
     header_wrapper.Children().Append(header_grid);
 
@@ -308,6 +340,7 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         const bool is_selected{m_selectedVariable.has_value()
             && m_selectedVariable->scope == ref.scope
             && m_selectedVariable->name == variable.name};
+        const bool is_protected{ref.scope == Environ::core::Scope::Machine && !m_elevated};
 
         // --- Main row ---
         auto row_border{Border{}};
@@ -315,19 +348,16 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         row_border.CornerRadius(CornerRadiusHelper::FromUniformRadius(2));
         row_border.MinHeight(kRowMinHeight);
 
-        // Alternating row tint
         if (visual_row % 2 == 1) {
             row_border.Background(ThemeBrush(L"SubtleFillColorSecondaryBrush"));
         }
 
-        // Selected row: left accent border
         if (is_selected) {
             row_border.BorderThickness(ThicknessHelper::FromLengths(2, 0, 0, 0));
             row_border.BorderBrush(ThemeBrush(L"AccentFillColorDefaultBrush"));
             m_selectedRowBorder = row_border;
         }
 
-        // Hover effect
         row_border.PointerEntered([is_selected](winrt::Windows::Foundation::IInspectable const& sender,
                                                 [[maybe_unused]] winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
             if (!is_selected) {
@@ -350,7 +380,7 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         ApplyColumnDefinitions(row_grid);
 
         // Name cell
-        auto name_cell{MakeCell(variable.name)};
+        auto name_cell{MakeCell(variable.name, is_protected)};
         name_cell.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
         WireScrollPassthrough(name_cell);
         Grid::SetColumn(name_cell, 0);
@@ -383,10 +413,20 @@ void EnvironmentPage::BuildList(Grid const& parent) {
 
         // Value cell(s)
         if (variable.kind == Environ::core::EnvVariableKind::PathList && !variable.segments.empty()) {
-            // First segment in the main row
-            auto first_cell{MakeCell(variable.segments[0])};
+            // First segment
+            auto first_wrapper{MakeValueWrapper()};
+            auto first_cell{MakeCell(variable.segments[0], is_protected)};
             WireScrollPassthrough(first_cell);
-            Grid::SetColumn(first_cell, 2);
+            first_wrapper.Child(first_cell);
+            Grid::SetColumn(first_wrapper, 2);
+
+            // Tooltip and invalid-path styling for segment 0
+            if (!variable.expanded_segments.empty()) {
+                const auto& expanded{variable.expanded_segments[0]};
+                auto tooltip{variable.segments[0] != expanded ? expanded : std::wstring{}};
+                bool valid{!variable.segment_valid.empty() && variable.segment_valid[0]};
+                ApplySegmentStyle(first_cell, valid, tooltip);
+            }
 
             first_cell.GotFocus([this, row_border, scope = ref.scope, idx = ref.index](
                                     winrt::Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
@@ -397,22 +437,35 @@ void EnvironmentPage::BuildList(Grid const& parent) {
                 SelectRow(row_border, scope, idx);
             });
 
-            first_cell.TextChanged([this, scope = ref.scope, idx = ref.index](
+            first_cell.TextChanged([this, scope = ref.scope, idx = ref.index, first_wrapper](
                                        winrt::Windows::Foundation::IInspectable const& sender,
                                        [[maybe_unused]] TextChangedEventArgs const& e) {
                 auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                const auto& originals{scope == Environ::core::Scope::User
+                    ? m_originalUserVariables : m_originalMachineVariables};
                 if (idx < vars.size() && !vars[idx].segments.empty()) {
                     vars[idx].segments[0] = sender.as<TextBox>().Text().c_str();
                     vars[idx].value = JoinSegments(vars[idx].segments);
+                    bool dirty{idx >= originals.size()
+                        || originals[idx].segments.empty()
+                        || vars[idx].segments[0] != originals[idx].segments[0]};
+                    MarkDirty(first_wrapper, dirty);
                 }
             });
 
-            row_grid.Children().Append(first_cell);
+            row_grid.Children().Append(first_wrapper);
         } else {
             // Scalar value
-            auto value_cell{MakeCell(variable.value)};
+            auto value_wrapper{MakeValueWrapper()};
+            auto value_cell{MakeCell(variable.value, is_protected)};
             WireScrollPassthrough(value_cell);
-            Grid::SetColumn(value_cell, 2);
+            value_wrapper.Child(value_cell);
+            Grid::SetColumn(value_wrapper, 2);
+
+            // Tooltip for expanded value
+            if (variable.is_expandable && variable.expanded_value != variable.value) {
+                ToolTipService::SetToolTip(value_cell, winrt::box_value(winrt::hstring{variable.expanded_value}));
+            }
 
             value_cell.GotFocus([this, row_border, scope = ref.scope, idx = ref.index](
                                     winrt::Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
@@ -423,16 +476,20 @@ void EnvironmentPage::BuildList(Grid const& parent) {
                 SelectRow(row_border, scope, idx);
             });
 
-            value_cell.TextChanged([this, scope = ref.scope, idx = ref.index](
+            value_cell.TextChanged([this, scope = ref.scope, idx = ref.index, value_wrapper](
                                        winrt::Windows::Foundation::IInspectable const& sender,
                                        [[maybe_unused]] TextChangedEventArgs const& e) {
                 auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                const auto& originals{scope == Environ::core::Scope::User
+                    ? m_originalUserVariables : m_originalMachineVariables};
                 if (idx < vars.size()) {
                     vars[idx].value = sender.as<TextBox>().Text().c_str();
+                    bool dirty{idx >= originals.size() || vars[idx].value != originals[idx].value};
+                    MarkDirty(value_wrapper, dirty);
                 }
             });
 
-            row_grid.Children().Append(value_cell);
+            row_grid.Children().Append(value_wrapper);
         }
 
         // Row tap selects
@@ -453,7 +510,6 @@ void EnvironmentPage::BuildList(Grid const& parent) {
                 cont_border.Padding(ThicknessHelper::FromLengths(8, 0, 8, 0));
                 cont_border.MinHeight(kRowMinHeight);
 
-                // Same alternating tint as the parent row (visual grouping)
                 if (visual_row % 2 == 1) {
                     cont_border.Background(ThemeBrush(L"SubtleFillColorSecondaryBrush"));
                 }
@@ -461,7 +517,6 @@ void EnvironmentPage::BuildList(Grid const& parent) {
                 auto cont_grid{Grid{}};
                 ApplyColumnDefinitions(cont_grid);
 
-                // Visual grouping: thin left line in name column area
                 auto indent_line{Border{}};
                 indent_line.Width(2);
                 indent_line.HorizontalAlignment(HorizontalAlignment::Left);
@@ -470,9 +525,19 @@ void EnvironmentPage::BuildList(Grid const& parent) {
                 indent_line.Opacity(0.4);
                 Grid::SetColumn(indent_line, 0);
 
-                auto seg_cell{MakeCell(variable.segments[seg_i])};
+                auto seg_wrapper{MakeValueWrapper()};
+                auto seg_cell{MakeCell(variable.segments[seg_i], is_protected)};
                 WireScrollPassthrough(seg_cell);
-                Grid::SetColumn(seg_cell, 2);
+                seg_wrapper.Child(seg_cell);
+                Grid::SetColumn(seg_wrapper, 2);
+
+                // Tooltip and invalid-path styling
+                if (seg_i < variable.expanded_segments.size()) {
+                    const auto& expanded{variable.expanded_segments[seg_i]};
+                    auto tooltip{variable.segments[seg_i] != expanded ? expanded : std::wstring{}};
+                    bool valid{seg_i < variable.segment_valid.size() && variable.segment_valid[seg_i]};
+                    ApplySegmentStyle(seg_cell, valid, tooltip);
+                }
 
                 seg_cell.GotFocus([this, row_border, scope = ref.scope, idx = ref.index](
                                       winrt::Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
@@ -483,18 +548,24 @@ void EnvironmentPage::BuildList(Grid const& parent) {
                     SelectRow(row_border, scope, idx);
                 });
 
-                seg_cell.TextChanged([this, scope = ref.scope, idx = ref.index, seg_i](
+                seg_cell.TextChanged([this, scope = ref.scope, idx = ref.index, seg_i, seg_wrapper](
                                          winrt::Windows::Foundation::IInspectable const& sender,
                                          [[maybe_unused]] TextChangedEventArgs const& e) {
                     auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                    const auto& originals{scope == Environ::core::Scope::User
+                        ? m_originalUserVariables : m_originalMachineVariables};
                     if (idx < vars.size() && seg_i < vars[idx].segments.size()) {
                         vars[idx].segments[seg_i] = sender.as<TextBox>().Text().c_str();
                         vars[idx].value = JoinSegments(vars[idx].segments);
+                        bool dirty{idx >= originals.size()
+                            || seg_i >= originals[idx].segments.size()
+                            || vars[idx].segments[seg_i] != originals[idx].segments[seg_i]};
+                        MarkDirty(seg_wrapper, dirty);
                     }
                 });
 
                 cont_grid.Children().Append(indent_line);
-                cont_grid.Children().Append(seg_cell);
+                cont_grid.Children().Append(seg_wrapper);
 
                 cont_border.Tapped([this, row_border, scope = ref.scope, idx = ref.index](
                                        [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
