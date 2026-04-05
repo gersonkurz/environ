@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(environ LANGUAGES CXX)
+project(environ LANGUAGES C CXX)
 
 # ---------------------------------------------------------------------------
 # nuget_install — download a NuGet package at configure time
@@ -81,6 +81,17 @@ endif()
 # ---------------------------------------------------------------------------
 # Target
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# SQLite3 (built as a separate C library to avoid C++ PCH conflicts)
+# ---------------------------------------------------------------------------
+add_library(sqlite3 STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/extern/sqlite3/src/sqlite3/sqlite3.c"
+)
+target_include_directories(sqlite3 PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/extern/sqlite3/src/sqlite3"
+)
+set_property(TARGET sqlite3 PROPERTY C_STANDARD 11)
+
 set(TARGET environ)
 
 add_executable(${TARGET} WIN32
@@ -91,6 +102,7 @@ add_executable(${TARGET} WIN32
     src/ui/EnvironmentPage.cpp    src/ui/EnvironmentPage.h
     src/core/EnvStore.cpp         src/core/EnvStore.h
     src/core/EnvWriter.cpp        src/core/EnvWriter.h
+    src/core/SnapshotStore.cpp    src/core/SnapshotStore.h
     "${WindowsAppSDK_DIR}/include/UndockedRegFreeWinRT-AutoInitializer.cpp"
 )
 
@@ -119,6 +131,7 @@ target_include_directories(${TARGET} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/extern/spdlog/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/extern/pnq/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/extern/tomlplusplus/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/extern/sqlite3/src/sqlite3"
     "${WindowsAppSDK_DIR}/include"
     "${CMAKE_CURRENT_BINARY_DIR}/Generated Files"
 )
@@ -128,6 +141,7 @@ target_link_directories(${TARGET} PRIVATE
 )
 
 target_link_libraries(${TARGET}
+    sqlite3
     Microsoft.WindowsAppRuntime
     WindowsApp
     ole32

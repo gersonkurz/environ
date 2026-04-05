@@ -153,6 +153,7 @@ EnvironmentPage::EnvironmentPage() {
     m_root = Grid{};
     m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
     m_elevated = Environ::core::is_elevated();
+    m_snapshotStore.open();
     Refresh();
 }
 
@@ -287,7 +288,15 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         OnSave();
     });
 
+    auto history_btn{Button{}};
+    history_btn.Content(winrt::box_value(L"History"));
+    history_btn.Click([this]([[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                             [[maybe_unused]] RoutedEventArgs const& args) {
+        OnHistory();
+    });
+
     toolbar.Children().Append(save_btn);
+    toolbar.Children().Append(history_btn);
     Grid::SetColumn(toolbar, 1);
 
     title_grid.Children().Append(title_panel);
@@ -623,6 +632,151 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     parent.Children().Append(m_scrollViewer);
 }
 
+void EnvironmentPage::OnHistory() {
+    auto snapshots{m_snapshotStore.list_snapshots()};
+
+    auto dlg{ContentDialog{}};
+    dlg.Title(winrt::box_value(L"Snapshot History"));
+    dlg.CloseButtonText(L"Close");
+    dlg.XamlRoot(m_root.XamlRoot());
+
+    if (snapshots.empty()) {
+        dlg.Content(winrt::box_value(L"No snapshots yet. Snapshots are created automatically when you save."));
+        dlg.ShowAsync();
+        return;
+    }
+
+    auto list_panel{StackPanel{}};
+    list_panel.Spacing(4);
+    list_panel.MinWidth(400);
+
+    for (const auto& snap : snapshots) {
+        auto row{Grid{}};
+        auto ts_col{ColumnDefinition{}};
+        ts_col.Width(GridLengthHelper::FromPixels(180));
+        auto label_col{ColumnDefinition{}};
+        label_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+        auto btn_col{ColumnDefinition{}};
+        btn_col.Width(GridLengthHelper::Auto());
+        row.ColumnDefinitions().Append(ts_col);
+        row.ColumnDefinitions().Append(label_col);
+        row.ColumnDefinitions().Append(btn_col);
+        row.ColumnSpacing(8);
+
+        auto ts_text{TextBlock{}};
+        ts_text.Text(winrt::to_hstring(snap.timestamp));
+        ts_text.FontSize(12);
+        ts_text.VerticalAlignment(VerticalAlignment::Center);
+        ts_text.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+        Grid::SetColumn(ts_text, 0);
+
+        auto label_text{TextBlock{}};
+        label_text.Text(winrt::to_hstring(snap.label));
+        label_text.FontSize(12);
+        label_text.VerticalAlignment(VerticalAlignment::Center);
+        Grid::SetColumn(label_text, 1);
+
+        auto restore_btn{Button{}};
+        restore_btn.Content(winrt::box_value(L"Restore"));
+        restore_btn.FontSize(11);
+        restore_btn.Padding(ThicknessHelper::FromLengths(8, 2, 8, 2));
+        Grid::SetColumn(restore_btn, 2);
+
+        restore_btn.Click([this, dlg, snapshot_id = snap.id, timestamp = snap.timestamp](
+                              [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                              [[maybe_unused]] RoutedEventArgs const& args) {
+            // Close history dialog before opening confirm dialog
+            dlg.Hide();
+
+            auto confirm{ContentDialog{}};
+            confirm.Title(winrt::box_value(L"Restore Snapshot"));
+            auto msg{TextBlock{}};
+            msg.Text(std::format(L"Restore environment to snapshot from {}?\n\n"
+                                 L"Current registry state will be saved as a snapshot first.",
+                                 winrt::to_hstring(timestamp)));
+            msg.TextWrapping(TextWrapping::Wrap);
+            confirm.Content(msg);
+            confirm.PrimaryButtonText(L"Restore");
+            confirm.CloseButtonText(L"Cancel");
+            confirm.XamlRoot(m_root.XamlRoot());
+
+            confirm.PrimaryButtonClick([this, snapshot_id](
+                                           [[maybe_unused]] ContentDialog const& s,
+                                           [[maybe_unused]] ContentDialogButtonClickEventArgs const& a) {
+                auto snap_vars{m_snapshotStore.load_snapshot(snapshot_id)};
+
+                // Safety snapshot of current state
+                auto fresh_user{Environ::core::read_variables(Environ::core::Scope::User)};
+                auto fresh_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
+                m_snapshotStore.create_snapshot("Auto (pre-restore)", fresh_user, fresh_machine);
+
+                // Split snapshot into user/machine
+                std::vector<Environ::core::EnvVariable> snap_user;
+                std::vector<Environ::core::EnvVariable> snap_machine;
+                for (const auto& sv : snap_vars) {
+                    Environ::core::EnvVariable var{
+                        .name{sv.name},
+                        .value{sv.value},
+                        .is_expandable{sv.is_expandable},
+                    };
+                    if (sv.scope == Environ::core::Scope::User) {
+                        snap_user.push_back(std::move(var));
+                    } else {
+                        snap_machine.push_back(std::move(var));
+                    }
+                }
+
+                // Compute full-replacement diffs
+                auto user_changes{Environ::core::compute_diff(fresh_user, snap_user)};
+                std::wstring errors;
+                if (!user_changes.empty()) {
+                    errors += Environ::core::apply_changes(Environ::core::Scope::User, user_changes);
+                }
+
+                if (m_elevated) {
+                    auto machine_changes{Environ::core::compute_diff(fresh_machine, snap_machine)};
+                    if (!machine_changes.empty()) {
+                        auto err{Environ::core::apply_changes(Environ::core::Scope::Machine, machine_changes)};
+                        if (!err.empty()) {
+                            if (!errors.empty()) errors += L"\n";
+                            errors += err;
+                        }
+                    }
+                }
+
+                Environ::core::broadcast_environment_change();
+
+                if (!errors.empty()) {
+                    auto err_dlg{ContentDialog{}};
+                    err_dlg.Title(winrt::box_value(L"Restore Errors"));
+                    auto err_text{TextBlock{}};
+                    err_text.Text(errors);
+                    err_text.TextWrapping(TextWrapping::Wrap);
+                    err_dlg.Content(err_text);
+                    err_dlg.CloseButtonText(L"OK");
+                    err_dlg.XamlRoot(m_root.XamlRoot());
+                    err_dlg.ShowAsync();
+                }
+
+                Refresh();
+            });
+
+            confirm.ShowAsync();
+        });
+
+        row.Children().Append(ts_text);
+        row.Children().Append(label_text);
+        row.Children().Append(restore_btn);
+        list_panel.Children().Append(row);
+    }
+
+    auto scroll{ScrollViewer{}};
+    scroll.MaxHeight(400);
+    scroll.Content(list_panel);
+    dlg.Content(scroll);
+    dlg.ShowAsync();
+}
+
 void EnvironmentPage::OnSave() {
     // 1. Compute diffs
     auto user_changes{Environ::core::compute_diff(m_originalUserVariables, m_userVariables)};
@@ -740,7 +894,9 @@ void EnvironmentPage::OnSave() {
             conflict_dlg.PrimaryButtonClick([this, user_changes, machine_changes](
                                                 [[maybe_unused]] ContentDialog const& s,
                                                 [[maybe_unused]] ContentDialogButtonClickEventArgs const& a) {
-                // Apply despite conflict
+                // Auto-snapshot before overwriting
+                m_snapshotStore.create_snapshot("Auto (pre-save)",
+                    m_originalUserVariables, m_originalMachineVariables);
                 std::wstring errors;
                 if (!user_changes.empty()) {
                     errors += Environ::core::apply_changes(Environ::core::Scope::User, user_changes);
@@ -772,7 +928,9 @@ void EnvironmentPage::OnSave() {
             return;
         }
 
-        // 4. No conflict — apply directly
+        // 4. No conflict — auto-snapshot then apply
+        m_snapshotStore.create_snapshot("Auto (pre-save)",
+            m_originalUserVariables, m_originalMachineVariables);
         std::wstring errors;
         if (!user_changes.empty()) {
             errors += Environ::core::apply_changes(Environ::core::Scope::User, user_changes);

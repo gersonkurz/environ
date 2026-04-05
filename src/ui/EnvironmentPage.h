@@ -2,6 +2,7 @@
 
 #include "pch.h"
 #include "../core/EnvStore.h"
+#include "../core/SnapshotStore.h"
 
 #include <optional>
 
@@ -27,6 +28,7 @@ private:
     std::vector<Environ::core::EnvVariable> m_originalMachineVariables;
     std::optional<SelectedVariable> m_selectedVariable;
     bool m_elevated{false};
+    Environ::core::SnapshotStore m_snapshotStore;
 
     void EnsureSelection();
     void BuildList(winrt::Microsoft::UI::Xaml::Controls::Grid const& parent);
@@ -34,4 +36,5 @@ private:
                    Environ::core::Scope scope, std::size_t variable_index);
     void WireScrollPassthrough(winrt::Microsoft::UI::Xaml::Controls::TextBox const& text_box);
     void OnSave();
+    void OnHistory();
 };
