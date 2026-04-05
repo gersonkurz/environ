@@ -82,8 +82,11 @@ Border MakeScopeBadge(Environ::core::Scope scope) {
     text.FontSize(11);
 
     if (scope == Environ::core::Scope::User) {
-        badge.Background(ThemeBrush(L"AccentFillColorDefaultBrush"));
-        text.Foreground(ThemeBrush(L"TextOnAccentFillColorPrimaryBrush"));
+        auto accent{winrt::unbox_value<winrt::Windows::UI::Color>(
+            Application::Current().Resources().Lookup(winrt::box_value(L"SystemAccentColor")))};
+        accent.A = 30;
+        badge.Background(SolidColorBrush{accent});
+        text.Foreground(ThemeBrush(L"AccentTextFillColorPrimaryBrush"));
     } else {
         badge.Background(ThemeBrush(L"ControlFillColorSecondaryBrush"));
         text.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
