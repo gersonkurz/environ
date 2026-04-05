@@ -380,10 +380,12 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         ApplyColumnDefinitions(row_grid);
 
         // Name cell
+        auto name_wrapper{MakeValueWrapper()};
         auto name_cell{MakeCell(variable.name, is_protected)};
         name_cell.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
         WireScrollPassthrough(name_cell);
-        Grid::SetColumn(name_cell, 0);
+        name_wrapper.Child(name_cell);
+        Grid::SetColumn(name_wrapper, 0);
 
         name_cell.GotFocus([this, row_border, scope = ref.scope, idx = ref.index](
                                winrt::Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
@@ -394,12 +396,16 @@ void EnvironmentPage::BuildList(Grid const& parent) {
             SelectRow(row_border, scope, idx);
         });
 
-        name_cell.TextChanged([this, scope = ref.scope, idx = ref.index](
+        name_cell.TextChanged([this, scope = ref.scope, idx = ref.index, name_wrapper](
                                   winrt::Windows::Foundation::IInspectable const& sender,
                                   [[maybe_unused]] TextChangedEventArgs const& e) {
             auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+            const auto& originals{scope == Environ::core::Scope::User
+                ? m_originalUserVariables : m_originalMachineVariables};
             if (idx < vars.size()) {
                 vars[idx].name = sender.as<TextBox>().Text().c_str();
+                bool dirty{idx >= originals.size() || vars[idx].name != originals[idx].name};
+                MarkDirty(name_wrapper, dirty);
             }
         });
 
@@ -408,7 +414,7 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         scope_badge.VerticalAlignment(VerticalAlignment::Center);
         Grid::SetColumn(scope_badge, 1);
 
-        row_grid.Children().Append(name_cell);
+        row_grid.Children().Append(name_wrapper);
         row_grid.Children().Append(scope_badge);
 
         // Value cell(s)
