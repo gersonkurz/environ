@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,7 +14,8 @@ struct EnvVariable {
     std::wstring value;
     std::vector<std::wstring> segments;
     EnvVariableKind kind;
-    bool is_expandable;  // REG_EXPAND_SZ vs REG_SZ
+    bool is_expandable;                          // REG_EXPAND_SZ vs REG_SZ
+    std::optional<std::wstring> original_name;   // set when user renames
 
     // Populated by expand_and_validate()
     std::wstring expanded_value;

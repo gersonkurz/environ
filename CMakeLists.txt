@@ -90,6 +90,7 @@ add_executable(${TARGET} WIN32
     src/ui/MainWindow.cpp         src/ui/MainWindow.h
     src/ui/EnvironmentPage.cpp    src/ui/EnvironmentPage.h
     src/core/EnvStore.cpp         src/core/EnvStore.h
+    src/core/EnvWriter.cpp        src/core/EnvWriter.h
     "${WindowsAppSDK_DIR}/include/UndockedRegFreeWinRT-AutoInitializer.cpp"
 )
 
