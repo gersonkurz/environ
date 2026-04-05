@@ -1,4 +1,5 @@
 #include "EnvironmentPage.h"
+#include "../core/EnvWriter.h"
 
 #include <algorithm>
 
@@ -240,11 +241,19 @@ void EnvironmentPage::BuildList(Grid const& parent) {
 
     auto refs{BuildVariableRefs(m_userVariables, m_machineVariables)};
 
-    // --- Title row ---
+    // --- Title row (title + toolbar) ---
+    auto title_grid{Grid{}};
+    title_grid.Margin(ThicknessHelper::FromLengths(0, 0, 0, 12));
+    auto title_left_col{ColumnDefinition{}};
+    title_left_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    auto title_right_col{ColumnDefinition{}};
+    title_right_col.Width(GridLengthHelper::Auto());
+    title_grid.ColumnDefinitions().Append(title_left_col);
+    title_grid.ColumnDefinitions().Append(title_right_col);
+
     auto title_panel{StackPanel{}};
     title_panel.Orientation(Orientation::Horizontal);
     title_panel.Spacing(8);
-    title_panel.Margin(ThicknessHelper::FromLengths(0, 0, 0, 12));
 
     auto title_text{TextBlock{}};
     title_text.Text(L"Environment Variables");
@@ -260,8 +269,31 @@ void EnvironmentPage::BuildList(Grid const& parent) {
 
     title_panel.Children().Append(title_text);
     title_panel.Children().Append(count_text);
-    Grid::SetRow(title_panel, 0);
-    parent.Children().Append(title_panel);
+    Grid::SetColumn(title_panel, 0);
+
+    // Toolbar buttons
+    auto toolbar{StackPanel{}};
+    toolbar.Orientation(Orientation::Horizontal);
+    toolbar.Spacing(4);
+
+    auto save_icon{FontIcon{}};
+    save_icon.Glyph(L"\uE74E");
+    save_icon.FontSize(14);
+
+    auto save_btn{Button{}};
+    save_btn.Content(winrt::box_value(L"Save"));
+    save_btn.Click([this]([[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                          [[maybe_unused]] RoutedEventArgs const& args) {
+        OnSave();
+    });
+
+    toolbar.Children().Append(save_btn);
+    Grid::SetColumn(toolbar, 1);
+
+    title_grid.Children().Append(title_panel);
+    title_grid.Children().Append(toolbar);
+    Grid::SetRow(title_grid, 0);
+    parent.Children().Append(title_grid);
 
     // --- Column header row ---
     auto header_grid{Grid{}};
@@ -589,6 +621,186 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     m_scrollViewer.Content(rows_panel);
     Grid::SetRow(m_scrollViewer, 2);
     parent.Children().Append(m_scrollViewer);
+}
+
+void EnvironmentPage::OnSave() {
+    // 1. Compute diffs
+    auto user_changes{Environ::core::compute_diff(m_originalUserVariables, m_userVariables)};
+    std::vector<Environ::core::EnvChange> machine_changes;
+    if (m_elevated) {
+        machine_changes = Environ::core::compute_diff(m_originalMachineVariables, m_machineVariables);
+    }
+
+    if (user_changes.empty() && machine_changes.empty()) {
+        auto dlg{ContentDialog{}};
+        dlg.Title(winrt::box_value(L"No Changes"));
+        dlg.Content(winrt::box_value(L"There are no changes to save."));
+        dlg.CloseButtonText(L"OK");
+        dlg.XamlRoot(m_root.XamlRoot());
+        dlg.ShowAsync();
+        return;
+    }
+
+    // 2. Dry-run review dialog
+    auto review_panel{StackPanel{}};
+    review_panel.Spacing(4);
+    review_panel.MaxWidth(500);
+
+    if (!user_changes.empty()) {
+        auto scope_label{TextBlock{}};
+        scope_label.Text(L"User scope:");
+        scope_label.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+        scope_label.Margin(ThicknessHelper::FromLengths(0, 4, 0, 2));
+        review_panel.Children().Append(scope_label);
+
+        for (const auto& c : user_changes) {
+            auto line{TextBlock{}};
+            line.Text(c.describe());
+            line.TextWrapping(TextWrapping::Wrap);
+            review_panel.Children().Append(line);
+        }
+    }
+
+    if (!machine_changes.empty()) {
+        auto scope_label{TextBlock{}};
+        scope_label.Text(L"Machine scope:");
+        scope_label.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+        scope_label.Margin(ThicknessHelper::FromLengths(0, 8, 0, 2));
+        review_panel.Children().Append(scope_label);
+
+        for (const auto& c : machine_changes) {
+            auto line{TextBlock{}};
+            line.Text(c.describe());
+            line.TextWrapping(TextWrapping::Wrap);
+            review_panel.Children().Append(line);
+        }
+    }
+
+    auto scroll{ScrollViewer{}};
+    scroll.MaxHeight(300);
+    scroll.Content(review_panel);
+
+    auto review_dlg{ContentDialog{}};
+    review_dlg.Title(winrt::box_value(L"Review Changes"));
+    review_dlg.Content(scroll);
+    review_dlg.PrimaryButtonText(L"Apply");
+    review_dlg.CloseButtonText(L"Cancel");
+    review_dlg.XamlRoot(m_root.XamlRoot());
+
+    review_dlg.PrimaryButtonClick([this, user_changes, machine_changes](
+                                      [[maybe_unused]] ContentDialog const& sender,
+                                      [[maybe_unused]] ContentDialogButtonClickEventArgs const& args) {
+        // 3. Conflict detection: re-read registry and compare with our baseline
+        auto fresh_user{Environ::core::read_variables(Environ::core::Scope::User)};
+        bool conflict{false};
+        std::wstring conflict_details;
+
+        if (fresh_user.size() != m_originalUserVariables.size()) {
+            conflict = true;
+            conflict_details += L"Number of User variables changed externally.\n";
+        } else {
+            for (std::size_t i{0}; i < fresh_user.size(); ++i) {
+                if (fresh_user[i].name != m_originalUserVariables[i].name ||
+                    fresh_user[i].value != m_originalUserVariables[i].value) {
+                    conflict = true;
+                    conflict_details += std::format(L"'{}' was changed externally.\n",
+                                                    fresh_user[i].name);
+                }
+            }
+        }
+
+        if (m_elevated) {
+            auto fresh_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
+            if (fresh_machine.size() != m_originalMachineVariables.size()) {
+                conflict = true;
+                conflict_details += L"Number of Machine variables changed externally.\n";
+            } else {
+                for (std::size_t i{0}; i < fresh_machine.size(); ++i) {
+                    if (fresh_machine[i].name != m_originalMachineVariables[i].name ||
+                        fresh_machine[i].value != m_originalMachineVariables[i].value) {
+                        conflict = true;
+                        conflict_details += std::format(L"'{}' (Machine) was changed externally.\n",
+                                                        fresh_machine[i].name);
+                    }
+                }
+            }
+        }
+
+        if (conflict) {
+            auto conflict_dlg{ContentDialog{}};
+            conflict_dlg.Title(winrt::box_value(L"External Changes Detected"));
+            auto conflict_text{TextBlock{}};
+            conflict_text.Text(conflict_details + L"\nOverwrite with your changes?");
+            conflict_text.TextWrapping(TextWrapping::Wrap);
+            conflict_dlg.Content(conflict_text);
+            conflict_dlg.PrimaryButtonText(L"Overwrite");
+            conflict_dlg.CloseButtonText(L"Cancel");
+            conflict_dlg.XamlRoot(m_root.XamlRoot());
+
+            conflict_dlg.PrimaryButtonClick([this, user_changes, machine_changes](
+                                                [[maybe_unused]] ContentDialog const& s,
+                                                [[maybe_unused]] ContentDialogButtonClickEventArgs const& a) {
+                // Apply despite conflict
+                std::wstring errors;
+                if (!user_changes.empty()) {
+                    errors += Environ::core::apply_changes(Environ::core::Scope::User, user_changes);
+                }
+                if (!machine_changes.empty()) {
+                    auto err{Environ::core::apply_changes(Environ::core::Scope::Machine, machine_changes)};
+                    if (!err.empty()) {
+                        if (!errors.empty()) errors += L"\n";
+                        errors += err;
+                    }
+                }
+                Environ::core::broadcast_environment_change();
+
+                if (!errors.empty()) {
+                    auto err_dlg{ContentDialog{}};
+                    err_dlg.Title(winrt::box_value(L"Save Errors"));
+                    auto err_text{TextBlock{}};
+                    err_text.Text(errors);
+                    err_text.TextWrapping(TextWrapping::Wrap);
+                    err_dlg.Content(err_text);
+                    err_dlg.CloseButtonText(L"OK");
+                    err_dlg.XamlRoot(m_root.XamlRoot());
+                    err_dlg.ShowAsync();
+                }
+                Refresh();
+            });
+
+            conflict_dlg.ShowAsync();
+            return;
+        }
+
+        // 4. No conflict — apply directly
+        std::wstring errors;
+        if (!user_changes.empty()) {
+            errors += Environ::core::apply_changes(Environ::core::Scope::User, user_changes);
+        }
+        if (!machine_changes.empty()) {
+            auto err{Environ::core::apply_changes(Environ::core::Scope::Machine, machine_changes)};
+            if (!err.empty()) {
+                if (!errors.empty()) errors += L"\n";
+                errors += err;
+            }
+        }
+        Environ::core::broadcast_environment_change();
+
+        if (!errors.empty()) {
+            auto err_dlg{ContentDialog{}};
+            err_dlg.Title(winrt::box_value(L"Save Errors"));
+            auto err_text{TextBlock{}};
+            err_text.Text(errors);
+            err_text.TextWrapping(TextWrapping::Wrap);
+            err_dlg.Content(err_text);
+            err_dlg.CloseButtonText(L"OK");
+            err_dlg.XamlRoot(m_root.XamlRoot());
+            err_dlg.ShowAsync();
+        }
+        Refresh();
+    });
+
+    review_dlg.ShowAsync();
 }
 
 void EnvironmentPage::WireScrollPassthrough(TextBox const& text_box) {

@@ -33,4 +33,5 @@ private:
     void SelectRow(winrt::Microsoft::UI::Xaml::Controls::Border const& row_border,
                    Environ::core::Scope scope, std::size_t variable_index);
     void WireScrollPassthrough(winrt::Microsoft::UI::Xaml::Controls::TextBox const& text_box);
+    void OnSave();
 };
