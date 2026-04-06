@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 
+#include <shellapi.h>
+
 MainWindow::MainWindow() {
     m_settings.load();
     InitializeComponent();
@@ -124,7 +126,7 @@ void MainWindow::InitializeComponent() {
             } else if (tag == L"settings") {
                 m_navView.Content(m_settingsPage->Root());
             } else if (tag == L"about") {
-                m_navView.Content(MakePlaceholder(L"About — coming soon"));
+                ShellExecuteW(nullptr, L"open", L"https://github.com/gersonkurz/environ", nullptr, nullptr, SW_SHOWNORMAL);
             }
         });
 
