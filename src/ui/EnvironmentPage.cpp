@@ -8,6 +8,7 @@
 #include <fstream>
 
 #include <commdlg.h>
+#include <shobjidl.h>
 
 using namespace winrt::Microsoft::UI::Xaml;
 using namespace winrt::Microsoft::UI::Xaml::Controls;
@@ -151,6 +152,65 @@ TextBox MakeCell(std::wstring const& text, bool read_only = false) {
     });
 
     return cell;
+}
+
+std::wstring BrowseForFolder(HWND owner, std::wstring const& initial_path = {}) {
+    std::wstring result;
+    IFileOpenDialog* dlg{nullptr};
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&dlg)))) {
+        DWORD options{0};
+        dlg->GetOptions(&options);
+        dlg->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        dlg->SetTitle(L"Select Folder");
+
+        // Set initial folder if the path exists
+        if (!initial_path.empty()) {
+            // Expand environment variables first
+            wchar_t expanded[MAX_PATH]{};
+            if (ExpandEnvironmentStringsW(initial_path.c_str(), expanded, MAX_PATH) > 0) {
+                IShellItem* folder{nullptr};
+                if (SUCCEEDED(SHCreateItemFromParsingName(expanded, nullptr, IID_PPV_ARGS(&folder)))) {
+                    dlg->SetFolder(folder);
+                    folder->Release();
+                }
+            }
+        }
+
+        if (SUCCEEDED(dlg->Show(owner))) {
+            IShellItem* item{nullptr};
+            if (SUCCEEDED(dlg->GetResult(&item))) {
+                PWSTR path{nullptr};
+                if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                    result = path;
+                    CoTaskMemFree(path);
+                }
+                item->Release();
+            }
+        }
+        dlg->Release();
+    }
+    return result;
+}
+
+bool LooksLikePath(std::wstring const& value) {
+    if (value.empty()) return false;
+    if (value.find(L'\\') != std::wstring::npos) return true;
+    if (value.find(L'/') != std::wstring::npos) return true;
+    if (value.starts_with(L"%")) return true;
+    return false;
+}
+
+Button MakeBrowseButton() {
+    auto btn{Button{}};
+    auto icon{FontIcon{}};
+    icon.Glyph(L"\uE838"); // FolderOpen
+    icon.FontSize(12);
+    btn.Content(icon);
+    btn.Padding(ThicknessHelper::FromLengths(4, 2, 4, 2));
+    btn.VerticalAlignment(VerticalAlignment::Center);
+    btn.Margin(ThicknessHelper::FromLengths(2, 0, 0, 0));
+    return btn;
 }
 
 Border MakeValueWrapper() {
@@ -563,7 +623,32 @@ void EnvironmentPage::RebuildRows() {
             auto first_wrapper{MakeValueWrapper()};
             auto first_cell{MakeCell(variable.segments[0], is_protected)};
             WireScrollPassthrough(first_cell);
-            first_wrapper.Child(first_cell);
+
+            auto first_inner{Grid{}};
+            auto first_text_col{ColumnDefinition{}};
+            first_text_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+            auto first_btn_col{ColumnDefinition{}};
+            first_btn_col.Width(GridLengthHelper::Auto());
+            first_inner.ColumnDefinitions().Append(first_text_col);
+            first_inner.ColumnDefinitions().Append(first_btn_col);
+            Grid::SetColumn(first_cell, 0);
+            first_inner.Children().Append(first_cell);
+
+            if (!is_protected) {
+                auto browse_btn{MakeBrowseButton()};
+                Grid::SetColumn(browse_btn, 1);
+                browse_btn.Click([this, first_cell](
+                                     [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                     [[maybe_unused]] RoutedEventArgs const& args) {
+                    auto path{BrowseForFolder(m_ownerHwnd, std::wstring{first_cell.Text()})};
+                    if (!path.empty()) {
+                        first_cell.Text(path);
+                    }
+                });
+                first_inner.Children().Append(browse_btn);
+            }
+
+            first_wrapper.Child(first_inner);
             Grid::SetColumn(first_wrapper, 2);
 
             // Tooltip and invalid-path styling for segment 0
@@ -605,7 +690,33 @@ void EnvironmentPage::RebuildRows() {
             auto value_wrapper{MakeValueWrapper()};
             auto value_cell{MakeCell(variable.value, is_protected)};
             WireScrollPassthrough(value_cell);
-            value_wrapper.Child(value_cell);
+
+            if (!is_protected && LooksLikePath(variable.value)) {
+                auto val_inner{Grid{}};
+                auto val_text_col{ColumnDefinition{}};
+                val_text_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+                auto val_btn_col{ColumnDefinition{}};
+                val_btn_col.Width(GridLengthHelper::Auto());
+                val_inner.ColumnDefinitions().Append(val_text_col);
+                val_inner.ColumnDefinitions().Append(val_btn_col);
+                Grid::SetColumn(value_cell, 0);
+                val_inner.Children().Append(value_cell);
+
+                auto browse_btn{MakeBrowseButton()};
+                Grid::SetColumn(browse_btn, 1);
+                browse_btn.Click([this, value_cell](
+                                     [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                     [[maybe_unused]] RoutedEventArgs const& args) {
+                    auto path{BrowseForFolder(m_ownerHwnd, std::wstring{value_cell.Text()})};
+                    if (!path.empty()) {
+                        value_cell.Text(path);
+                    }
+                });
+                val_inner.Children().Append(browse_btn);
+                value_wrapper.Child(val_inner);
+            } else {
+                value_wrapper.Child(value_cell);
+            }
             Grid::SetColumn(value_wrapper, 2);
 
             // Tooltip for expanded value
@@ -676,7 +787,32 @@ void EnvironmentPage::RebuildRows() {
                 auto seg_wrapper{MakeValueWrapper()};
                 auto seg_cell{MakeCell(variable.segments[seg_i], is_protected)};
                 WireScrollPassthrough(seg_cell);
-                seg_wrapper.Child(seg_cell);
+
+                auto seg_inner{Grid{}};
+                auto seg_text_col{ColumnDefinition{}};
+                seg_text_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+                auto seg_btn_col{ColumnDefinition{}};
+                seg_btn_col.Width(GridLengthHelper::Auto());
+                seg_inner.ColumnDefinitions().Append(seg_text_col);
+                seg_inner.ColumnDefinitions().Append(seg_btn_col);
+                Grid::SetColumn(seg_cell, 0);
+                seg_inner.Children().Append(seg_cell);
+
+                if (!is_protected) {
+                    auto browse_btn{MakeBrowseButton()};
+                    Grid::SetColumn(browse_btn, 1);
+                    browse_btn.Click([this, seg_cell](
+                                         [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                         [[maybe_unused]] RoutedEventArgs const& args) {
+                        auto path{BrowseForFolder(m_ownerHwnd, std::wstring{seg_cell.Text()})};
+                        if (!path.empty()) {
+                            seg_cell.Text(path);
+                        }
+                    });
+                    seg_inner.Children().Append(browse_btn);
+                }
+
+                seg_wrapper.Child(seg_inner);
                 Grid::SetColumn(seg_wrapper, 2);
 
                 // Tooltip and invalid-path styling
@@ -747,7 +883,35 @@ void EnvironmentPage::RebuildRows() {
                 auto add_seg_cell{MakeCell(L"")};
                 add_seg_cell.PlaceholderText(L"Add path entry...");
                 WireScrollPassthrough(add_seg_cell);
-                Grid::SetColumn(add_seg_cell, 2);
+
+                auto add_seg_inner{Grid{}};
+                auto add_seg_text_col{ColumnDefinition{}};
+                add_seg_text_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+                auto add_seg_btn_col{ColumnDefinition{}};
+                add_seg_btn_col.Width(GridLengthHelper::Auto());
+                add_seg_inner.ColumnDefinitions().Append(add_seg_text_col);
+                add_seg_inner.ColumnDefinitions().Append(add_seg_btn_col);
+                Grid::SetColumn(add_seg_cell, 0);
+                add_seg_inner.Children().Append(add_seg_cell);
+
+                auto add_browse_btn{MakeBrowseButton()};
+                Grid::SetColumn(add_browse_btn, 1);
+                add_browse_btn.Click([this, scope = ref.scope, idx = ref.index](
+                                         [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                         [[maybe_unused]] RoutedEventArgs const& args) {
+                    auto path{BrowseForFolder(m_ownerHwnd)};
+                    if (path.empty()) return;
+
+                    auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                    if (idx < vars.size()) {
+                        vars[idx].segments.push_back(path);
+                        vars[idx].value = JoinSegments(vars[idx].segments);
+                        RebuildRows();
+                    }
+                });
+                add_seg_inner.Children().Append(add_browse_btn);
+
+                Grid::SetColumn(add_seg_inner, 2);
 
                 add_seg_cell.KeyDown([this, scope = ref.scope, idx = ref.index](
                                          winrt::Windows::Foundation::IInspectable const& sender,
@@ -785,7 +949,7 @@ void EnvironmentPage::RebuildRows() {
                 });
 
                 add_seg_grid.Children().Append(add_seg_indent);
-                add_seg_grid.Children().Append(add_seg_cell);
+                add_seg_grid.Children().Append(add_seg_inner);
                 add_seg_border.Child(add_seg_grid);
                 m_rowsPanel.Children().Append(add_seg_border);
                 ++visual_row;
