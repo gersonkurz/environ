@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='utf-8'?>
+<setup>
+    <!-- Setup script uses MSIS - see https://github.com/gersonkurz/msis -->
+    <set name="PRODUCT_NAME" value="Environ x64"/>
+    <set name="PRODUCT_VERSION" value="1.0.0"/>
+    <set name="LANGUAGE" value="en-us"/>
+    <set name="PLATFORM" value="x64"/>
+    <set name="REPAIR_ENABLED" value="False"/>
+    <set name="REMOVE_ENABLED" value="False"/>
+    <set name="DISABLE_REGISTRY_PERMISSIONS" value="False"/>
+    <set name="REMOVE_FOLDERS_ON_UNINSTALL" value="True"/>
+    <set name="BUILD_TARGET" value="Environ 1.0.0 x64.msi"/>
+    <set name="UPGRADE_CODE" value="C89F745C-3300-4BE3-930F-73D6FDEDB1EF"/>
+    <set name="PRODUCT_GUID" value="84A702CA-A91B-409E-AADE-C51D1359FDCE"/>
+    <set name="MANUFACTURER" value="https://github.com/gersonkurz"/>
+    <set name="INSTALLDIR" value="Environ"/>
+    <feature name="Environ" enabled="yes" allowed="no">
+        <files source="..\\Build\\Release" target="INSTALLDIR"/>
+    </feature>
+</setup>
