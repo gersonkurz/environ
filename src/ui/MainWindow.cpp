@@ -5,6 +5,7 @@
 
 MainWindow::MainWindow() {
     m_settings.load();
+    m_snapshotStore.open();
     InitializeComponent();
     RestoreWindowPlacement();
 
@@ -130,7 +131,15 @@ void MainWindow::InitializeComponent() {
     aboutItem.Icon(infoIcon);
     aboutItem.Tag(winrt::box_value(L"about"));
 
+    auto historyItem{NavigationViewItem{}};
+    historyItem.Content(winrt::box_value(L"History"));
+    auto historyIcon{FontIcon{}};
+    historyIcon.Glyph(L"\uE81C");
+    historyItem.Icon(historyIcon);
+    historyItem.Tag(winrt::box_value(L"history"));
+
     m_navView.MenuItems().Append(envItem);
+    m_navView.MenuItems().Append(historyItem);
     m_navView.FooterMenuItems().Append(settingsItem);
     m_navView.FooterMenuItems().Append(aboutItem);
 
@@ -141,7 +150,10 @@ void MainWindow::InitializeComponent() {
         interop->get_WindowHandle(&hwnd);
     }
 
-    m_envPage = std::make_unique<EnvironmentPage>(hwnd);
+    m_envPage = std::make_unique<EnvironmentPage>(m_snapshotStore, hwnd);
+    m_historyPage = std::make_unique<HistoryPage>(m_snapshotStore, [this]() {
+        m_envPage->Refresh();
+    });
     m_settingsPage = std::make_unique<SettingsPage>(m_settings, [this]() {
         ApplyTheme();
         m_envPage->Refresh();
@@ -158,6 +170,9 @@ void MainWindow::InitializeComponent() {
             auto tag{winrt::unbox_value<winrt::hstring>(item.Tag())};
             if (tag == L"env") {
                 m_navView.Content(m_envPage->Root());
+            } else if (tag == L"history") {
+                m_historyPage->Refresh();
+                m_navView.Content(m_historyPage->Root());
             } else if (tag == L"settings") {
                 m_navView.Content(m_settingsPage->Root());
             } else if (tag == L"about") {

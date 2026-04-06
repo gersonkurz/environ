@@ -2,10 +2,12 @@
 
 #include "pch.h"
 #include "../core/AppSettings.h"
+#include "../core/SnapshotStore.h"
 
 #include <memory>
 
 #include "EnvironmentPage.h"
+#include "HistoryPage.h"
 #include "SettingsPage.h"
 
 struct MainWindow
@@ -30,8 +32,10 @@ private:
     winrt::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider m_provider;
     winrt::Microsoft::UI::Xaml::Controls::NavigationView m_navView;
     std::unique_ptr<EnvironmentPage> m_envPage;
+    std::unique_ptr<HistoryPage> m_historyPage;
     std::unique_ptr<SettingsPage> m_settingsPage;
     Environ::core::AppSettings m_settings;
+    Environ::core::SnapshotStore m_snapshotStore;
 
     void RestoreWindowPlacement();
     void SaveWindowPlacement();

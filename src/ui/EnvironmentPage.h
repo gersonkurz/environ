@@ -8,7 +8,7 @@
 
 class EnvironmentPage {
 public:
-    EnvironmentPage(HWND owner_hwnd = nullptr);
+    EnvironmentPage(Environ::core::SnapshotStore& snapshot_store, HWND owner_hwnd = nullptr);
 
     winrt::Microsoft::UI::Xaml::UIElement Root() const;
     void Refresh();
@@ -31,7 +31,7 @@ private:
     HWND m_ownerHwnd{nullptr};
     bool m_elevated{false};
     std::wstring m_filterText;
-    Environ::core::SnapshotStore m_snapshotStore;
+    Environ::core::SnapshotStore& m_snapshotStore;
 
     void EnsureSelection();
     void BuildList(winrt::Microsoft::UI::Xaml::Controls::Grid const& parent);
@@ -41,5 +41,4 @@ private:
     void RebuildRows();
     void OnSave();
     void OnExport();
-    void OnHistory();
 };

@@ -240,8 +240,9 @@ void ApplySegmentStyle(TextBox const& cell, bool valid, std::wstring const& tool
 
 } // namespace
 
-EnvironmentPage::EnvironmentPage(HWND owner_hwnd)
-    : m_ownerHwnd{owner_hwnd}
+EnvironmentPage::EnvironmentPage(Environ::core::SnapshotStore& snapshot_store, HWND owner_hwnd)
+    : m_snapshotStore{snapshot_store}
+    , m_ownerHwnd{owner_hwnd}
 {
     m_root = Grid{};
     m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
@@ -268,7 +269,6 @@ EnvironmentPage::EnvironmentPage(HWND owner_hwnd)
     });
 
     m_elevated = Environ::core::is_elevated();
-    m_snapshotStore.open();
     Refresh();
 }
 
@@ -422,13 +422,6 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         OnSave();
     });
 
-    auto history_btn{Button{}};
-    history_btn.Content(winrt::box_value(L"History"));
-    history_btn.Click([this]([[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
-                             [[maybe_unused]] RoutedEventArgs const& args) {
-        OnHistory();
-    });
-
     auto export_btn{Button{}};
     export_btn.Content(winrt::box_value(L"Export"));
     export_btn.Click([this]([[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
@@ -437,7 +430,6 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     });
 
     toolbar.Children().Append(save_btn);
-    toolbar.Children().Append(history_btn);
     toolbar.Children().Append(export_btn);
     Grid::SetColumn(toolbar, 2);
 
@@ -1092,211 +1084,6 @@ void EnvironmentPage::OnExport() {
         dlg.XamlRoot(m_root.XamlRoot());
         dlg.ShowAsync();
     }
-}
-
-void EnvironmentPage::OnHistory() {
-    auto snapshots{m_snapshotStore.list_snapshots()};
-
-    auto dlg{ContentDialog{}};
-    dlg.Title(winrt::box_value(L"Snapshot History"));
-    dlg.CloseButtonText(L"Close");
-    dlg.XamlRoot(m_root.XamlRoot());
-
-    if (snapshots.empty()) {
-        dlg.Content(winrt::box_value(L"No snapshots yet. Snapshots are created automatically when you save."));
-        dlg.ShowAsync();
-        return;
-    }
-
-    // Two-part layout: snapshot list (top) + change details (bottom)
-    auto outer{Grid{}};
-    outer.MinWidth(500);
-    auto list_row{RowDefinition{}};
-    list_row.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
-    auto detail_row{RowDefinition{}};
-    detail_row.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
-    outer.RowDefinitions().Append(list_row);
-    outer.RowDefinitions().Append(detail_row);
-
-    // Change detail panel (bottom) — updated when a snapshot is clicked
-    auto detail_panel{StackPanel{}};
-    detail_panel.Spacing(2);
-
-    auto detail_header{TextBlock{}};
-    detail_header.Text(L"Select a snapshot to see changes");
-    detail_header.FontSize(12);
-    detail_header.Opacity(0.6);
-    detail_header.FontStyle(winrt::Windows::UI::Text::FontStyle::Italic);
-    detail_panel.Children().Append(detail_header);
-
-    auto detail_scroll{ScrollViewer{}};
-    detail_scroll.MaxHeight(150);
-    detail_scroll.Content(detail_panel);
-    detail_scroll.Margin(ThicknessHelper::FromLengths(0, 8, 0, 0));
-    Grid::SetRow(detail_scroll, 1);
-    outer.Children().Append(detail_scroll);
-
-    // Snapshot list (top)
-    auto list_panel{StackPanel{}};
-    list_panel.Spacing(4);
-
-    for (const auto& snap : snapshots) {
-        auto row{Grid{}};
-        auto ts_col{ColumnDefinition{}};
-        ts_col.Width(GridLengthHelper::FromPixels(180));
-        auto label_col{ColumnDefinition{}};
-        label_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
-        auto btn_col{ColumnDefinition{}};
-        btn_col.Width(GridLengthHelper::Auto());
-        row.ColumnDefinitions().Append(ts_col);
-        row.ColumnDefinitions().Append(label_col);
-        row.ColumnDefinitions().Append(btn_col);
-        row.ColumnSpacing(8);
-
-        auto ts_text{TextBlock{}};
-        ts_text.Text(winrt::to_hstring(snap.timestamp));
-        ts_text.FontSize(12);
-        ts_text.VerticalAlignment(VerticalAlignment::Center);
-        ts_text.Opacity(0.6);
-        Grid::SetColumn(ts_text, 0);
-
-        auto label_text{TextBlock{}};
-        label_text.Text(winrt::to_hstring(snap.label));
-        label_text.FontSize(12);
-        label_text.VerticalAlignment(VerticalAlignment::Center);
-        Grid::SetColumn(label_text, 1);
-
-        // Clicking the row shows change details
-        auto row_border{Border{}};
-        row_border.Padding(ThicknessHelper::FromLengths(4, 2, 4, 2));
-        row_border.CornerRadius(CornerRadiusHelper::FromUniformRadius(4));
-        row_border.Tapped([this, detail_panel, snapshot_id = snap.id](
-                              [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
-                              [[maybe_unused]] winrt::Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const& args) {
-            detail_panel.Children().Clear();
-
-            auto header{TextBlock{}};
-            header.Text(L"Changes in this snapshot:");
-            header.FontSize(12);
-            header.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-            header.Margin(ThicknessHelper::FromLengths(0, 0, 0, 4));
-            detail_panel.Children().Append(header);
-
-            auto changes{m_snapshotStore.describe_snapshot_changes(snapshot_id)};
-            for (const auto& desc : changes) {
-                auto line{TextBlock{}};
-                line.Text(desc);
-                line.FontSize(12);
-                line.TextWrapping(TextWrapping::Wrap);
-                detail_panel.Children().Append(line);
-            }
-        });
-
-        auto restore_btn{Button{}};
-        restore_btn.Content(winrt::box_value(L"Restore"));
-        restore_btn.FontSize(11);
-        restore_btn.Padding(ThicknessHelper::FromLengths(8, 2, 8, 2));
-        Grid::SetColumn(restore_btn, 2);
-
-        restore_btn.Click([this, dlg, snapshot_id = snap.id, timestamp = snap.timestamp](
-                              [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
-                              [[maybe_unused]] RoutedEventArgs const& args) {
-            // Close history dialog before opening confirm dialog
-            dlg.Hide();
-
-            auto confirm{ContentDialog{}};
-            confirm.Title(winrt::box_value(L"Restore Snapshot"));
-            auto msg{TextBlock{}};
-            msg.Text(std::format(L"Restore environment to snapshot from {}?\n\n"
-                                 L"Current registry state will be saved as a snapshot first.",
-                                 winrt::to_hstring(timestamp)));
-            msg.TextWrapping(TextWrapping::Wrap);
-            confirm.Content(msg);
-            confirm.PrimaryButtonText(L"Restore");
-            confirm.CloseButtonText(L"Cancel");
-            confirm.XamlRoot(m_root.XamlRoot());
-
-            confirm.PrimaryButtonClick([this, snapshot_id](
-                                           [[maybe_unused]] ContentDialog const& s,
-                                           [[maybe_unused]] ContentDialogButtonClickEventArgs const& a) {
-                auto snap_vars{m_snapshotStore.load_snapshot(snapshot_id)};
-
-                // Safety snapshot — only if current state differs from latest snapshot
-                auto fresh_user{Environ::core::read_variables(Environ::core::Scope::User)};
-                auto fresh_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
-                if (!m_snapshotStore.matches_latest_snapshot(fresh_user, fresh_machine)) {
-                    m_snapshotStore.create_snapshot("Auto (pre-restore)", fresh_user, fresh_machine);
-                }
-
-                // Split snapshot into user/machine
-                std::vector<Environ::core::EnvVariable> snap_user;
-                std::vector<Environ::core::EnvVariable> snap_machine;
-                for (const auto& sv : snap_vars) {
-                    Environ::core::EnvVariable var{
-                        .name{sv.name},
-                        .value{sv.value},
-                        .is_expandable{sv.is_expandable},
-                    };
-                    if (sv.scope == Environ::core::Scope::User) {
-                        snap_user.push_back(std::move(var));
-                    } else {
-                        snap_machine.push_back(std::move(var));
-                    }
-                }
-
-                // Compute full-replacement diffs
-                auto user_changes{Environ::core::compute_diff(fresh_user, snap_user)};
-                std::wstring errors;
-                if (!user_changes.empty()) {
-                    errors += Environ::core::apply_changes(Environ::core::Scope::User, user_changes);
-                }
-
-                if (m_elevated) {
-                    auto machine_changes{Environ::core::compute_diff(fresh_machine, snap_machine)};
-                    if (!machine_changes.empty()) {
-                        auto err{Environ::core::apply_changes(Environ::core::Scope::Machine, machine_changes)};
-                        if (!err.empty()) {
-                            if (!errors.empty()) errors += L"\n";
-                            errors += err;
-                        }
-                    }
-                }
-
-                Environ::core::broadcast_environment_change();
-
-                if (!errors.empty()) {
-                    auto err_dlg{ContentDialog{}};
-                    err_dlg.Title(winrt::box_value(L"Restore Errors"));
-                    auto err_text{TextBlock{}};
-                    err_text.Text(errors);
-                    err_text.TextWrapping(TextWrapping::Wrap);
-                    err_dlg.Content(err_text);
-                    err_dlg.CloseButtonText(L"OK");
-                    err_dlg.XamlRoot(m_root.XamlRoot());
-                    err_dlg.ShowAsync();
-                }
-
-                Refresh();
-            });
-
-            confirm.ShowAsync();
-        });
-
-        row.Children().Append(ts_text);
-        row.Children().Append(label_text);
-        row.Children().Append(restore_btn);
-        row_border.Child(row);
-        list_panel.Children().Append(row_border);
-    }
-
-    auto list_scroll{ScrollViewer{}};
-    list_scroll.MaxHeight(200);
-    list_scroll.Content(list_panel);
-    Grid::SetRow(list_scroll, 0);
-    outer.Children().Append(list_scroll);
-
-    dlg.Content(outer);
-    dlg.ShowAsync();
 }
 
 void EnvironmentPage::OnSave() {

@@ -98,6 +98,7 @@ add_executable(${TARGET} WIN32
     src/ui/pch.cpp
     src/ui/main.cpp
     src/ui/App.cpp                src/ui/App.h
+    src/ui/HistoryPage.cpp        src/ui/HistoryPage.h
     src/ui/MainWindow.cpp         src/ui/MainWindow.h
     src/ui/SettingsPage.cpp       src/ui/SettingsPage.h
     src/ui/EnvironmentPage.cpp    src/ui/EnvironmentPage.h
