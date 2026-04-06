@@ -140,6 +140,17 @@ void MainWindow::InitializeComponent() {
 
     m_navView.MenuItems().Append(envItem);
     m_navView.MenuItems().Append(historyItem);
+
+    if (!Environ::core::is_elevated()) {
+        auto adminItem{NavigationViewItem{}};
+        adminItem.Content(winrt::box_value(L"Restart as Admin"));
+        auto shieldIcon{FontIcon{}};
+        shieldIcon.Glyph(L"\uE7EF");
+        adminItem.Icon(shieldIcon);
+        adminItem.Tag(winrt::box_value(L"admin"));
+        m_navView.FooterMenuItems().Append(adminItem);
+    }
+
     m_navView.FooterMenuItems().Append(settingsItem);
     m_navView.FooterMenuItems().Append(aboutItem);
 
@@ -175,6 +186,15 @@ void MainWindow::InitializeComponent() {
                 m_navView.Content(m_historyPage->Root());
             } else if (tag == L"settings") {
                 m_navView.Content(m_settingsPage->Root());
+            } else if (tag == L"admin") {
+                wchar_t exe_path[MAX_PATH]{};
+                GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+                auto result{reinterpret_cast<INT_PTR>(
+                    ShellExecuteW(nullptr, L"runas", exe_path, nullptr, nullptr, SW_SHOWNORMAL))};
+                if (result > 32) {
+                    Close();
+                }
+                // If result <= 32 (user cancelled UAC or error), stay open
             } else if (tag == L"about") {
                 ShellExecuteW(nullptr, L"open", L"https://github.com/gersonkurz/environ", nullptr, nullptr, SW_SHOWNORMAL);
             }
