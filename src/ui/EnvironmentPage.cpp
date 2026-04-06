@@ -703,7 +703,166 @@ void EnvironmentPage::RebuildRows() {
                 m_rowsPanel.Children().Append(cont_border);
                 ++visual_row;
             }
+
+            // "Add segment" empty row at end of path-list (only if editable)
+            if (!is_protected) {
+                auto add_seg_border{Border{}};
+                add_seg_border.Padding(ThicknessHelper::FromLengths(8, 0, 8, 0));
+                add_seg_border.MinHeight(kRowMinHeight);
+                add_seg_border.Opacity(0.5);
+
+                auto add_seg_grid{Grid{}};
+                ApplyColumnDefinitions(add_seg_grid);
+
+                auto add_seg_indent{Border{}};
+                add_seg_indent.Width(2);
+                add_seg_indent.HorizontalAlignment(HorizontalAlignment::Left);
+                add_seg_indent.Margin(ThicknessHelper::FromLengths(6, 0, 0, 0));
+                add_seg_indent.Background(ThemeBrush(L"ControlStrokeColorDefaultBrush"));
+                add_seg_indent.Opacity(0.4);
+                Grid::SetColumn(add_seg_indent, 0);
+
+                auto add_seg_cell{MakeCell(L"")};
+                add_seg_cell.PlaceholderText(L"Add path entry...");
+                WireScrollPassthrough(add_seg_cell);
+                Grid::SetColumn(add_seg_cell, 2);
+
+                add_seg_cell.KeyDown([this, scope = ref.scope, idx = ref.index](
+                                         winrt::Windows::Foundation::IInspectable const& sender,
+                                         winrt::Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const& args) {
+                    if (args.Key() != winrt::Windows::System::VirtualKey::Enter) return;
+                    auto text{std::wstring{sender.as<TextBox>().Text()}};
+                    if (text.empty()) return;
+
+                    auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                    if (idx < vars.size()) {
+                        vars[idx].segments.push_back(text);
+                        vars[idx].value = JoinSegments(vars[idx].segments);
+                        RebuildRows();
+                    }
+                    args.Handled(true);
+                });
+
+                add_seg_cell.LostFocus([this, scope = ref.scope, idx = ref.index](
+                                           winrt::Windows::Foundation::IInspectable const& sender,
+                                           [[maybe_unused]] RoutedEventArgs const& e) {
+                    auto box{sender.as<TextBox>()};
+                    auto text{std::wstring{box.Text()}};
+                    box.BorderThickness(ThicknessHelper::FromUniformLength(0));
+                    box.Background(SolidColorBrush{winrt::Windows::UI::Colors::Transparent()});
+                    if (text.empty()) return;
+
+                    auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                    if (idx < vars.size()) {
+                        vars[idx].segments.push_back(text);
+                        vars[idx].value = JoinSegments(vars[idx].segments);
+                        RebuildRows();
+                    }
+                });
+
+                add_seg_grid.Children().Append(add_seg_indent);
+                add_seg_grid.Children().Append(add_seg_cell);
+                add_seg_border.Child(add_seg_grid);
+                m_rowsPanel.Children().Append(add_seg_border);
+                ++visual_row;
+            }
         }
+    }
+
+    // "Add variable" empty row at the bottom
+    {
+        auto add_border{Border{}};
+        add_border.Padding(ThicknessHelper::FromLengths(8, 0, 8, 0));
+        add_border.MinHeight(kRowMinHeight);
+        add_border.Opacity(0.5);
+
+        auto add_grid{Grid{}};
+        ApplyColumnDefinitions(add_grid);
+
+        auto add_name_cell{MakeCell(L"")};
+        add_name_cell.PlaceholderText(L"New variable...");
+        WireScrollPassthrough(add_name_cell);
+        Grid::SetColumn(add_name_cell, 0);
+
+        auto add_value_cell{MakeCell(L"")};
+        add_value_cell.PlaceholderText(L"Value");
+        WireScrollPassthrough(add_value_cell);
+        Grid::SetColumn(add_value_cell, 2);
+
+        // Commit when focus leaves either cell — but not when tabbing between them
+        auto commit = [this, add_name_cell, add_value_cell]() {
+            auto name{std::wstring{add_name_cell.Text()}};
+            if (name.empty()) return;
+
+            // Check if focus moved to the sibling cell — if so, don't commit yet
+            auto focused{winrt::Microsoft::UI::Xaml::Input::FocusManager::GetFocusedElement(m_root.XamlRoot())};
+            if (focused == add_name_cell || focused == add_value_cell) return;
+
+            auto value{std::wstring{add_value_cell.Text()}};
+            m_userVariables.push_back(Environ::core::EnvVariable{
+                .name{name},
+                .value{value},
+                .kind{Environ::core::EnvVariableKind::Scalar},
+                .is_expandable{false},
+            });
+            RebuildRows();
+        };
+
+        add_name_cell.LostFocus([commit, add_name_cell](
+                                    [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                    [[maybe_unused]] RoutedEventArgs const& e) {
+            add_name_cell.BorderThickness(ThicknessHelper::FromUniformLength(0));
+            add_name_cell.Background(SolidColorBrush{winrt::Windows::UI::Colors::Transparent()});
+            commit();
+        });
+
+        add_value_cell.LostFocus([commit, add_value_cell](
+                                     [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                     [[maybe_unused]] RoutedEventArgs const& e) {
+            add_value_cell.BorderThickness(ThicknessHelper::FromUniformLength(0));
+            add_value_cell.Background(SolidColorBrush{winrt::Windows::UI::Colors::Transparent()});
+            commit();
+        });
+
+        // Enter in value cell commits immediately
+        add_value_cell.KeyDown([this, add_name_cell, add_value_cell](
+                                   winrt::Windows::Foundation::IInspectable const&,
+                                   winrt::Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const& args) {
+            if (args.Key() != winrt::Windows::System::VirtualKey::Enter) return;
+            auto name{std::wstring{add_name_cell.Text()}};
+            if (name.empty()) return;
+
+            auto value{std::wstring{add_value_cell.Text()}};
+            m_userVariables.push_back(Environ::core::EnvVariable{
+                .name{name},
+                .value{value},
+                .kind{Environ::core::EnvVariableKind::Scalar},
+                .is_expandable{false},
+            });
+            RebuildRows();
+            args.Handled(true);
+        });
+
+        // GotFocus styling for both cells
+        auto focus_style = [](winrt::Windows::Foundation::IInspectable const& sender,
+                              [[maybe_unused]] RoutedEventArgs const& e) {
+            auto box{sender.as<TextBox>()};
+            box.BorderThickness(ThicknessHelper::FromUniformLength(1));
+            box.BorderBrush(ThemeBrush(L"ControlStrokeColorDefaultBrush"));
+            box.Background(ThemeBrush(L"ControlFillColorDefaultBrush"));
+        };
+        add_name_cell.GotFocus(focus_style);
+        add_value_cell.GotFocus(focus_style);
+
+        auto add_scope{MakeScopeBadge(Environ::core::Scope::User)};
+        add_scope.VerticalAlignment(VerticalAlignment::Center);
+        Grid::SetColumn(add_scope, 1);
+
+        add_grid.Children().Append(add_name_cell);
+        add_grid.Children().Append(add_scope);
+        add_grid.Children().Append(add_value_cell);
+        add_border.Child(add_grid);
+        m_rowsPanel.Children().Append(add_border);
     }
 
 }
