@@ -181,6 +181,63 @@ void expand_and_validate(std::vector<EnvVariable>& variables) {
     }
 }
 
+void detect_duplicates(std::vector<EnvVariable>& user_vars,
+                       std::vector<EnvVariable>& machine_vars) {
+    // Build a map of expanded path → "Scope:VarName" for all path-list segments
+    // Key: lowercased expanded path, Value: {scope label, var name, segment index}
+    struct SegmentLocation {
+        std::wstring scope;
+        std::wstring var_name;
+        std::size_t seg_index;
+    };
+
+    std::unordered_map<std::wstring, std::vector<SegmentLocation>> seen;
+
+    auto process = [&](std::vector<EnvVariable>& vars, std::wstring const& scope_label) {
+        for (auto& var : vars) {
+            if (var.kind != EnvVariableKind::PathList) continue;
+
+            var.segment_duplicate.resize(var.segments.size());
+
+            for (std::size_t i{0}; i < var.expanded_segments.size(); ++i) {
+                // Normalize: lowercase, remove trailing backslash
+                auto key{var.expanded_segments[i]};
+                std::ranges::transform(key, key.begin(), ::towlower);
+                while (key.size() > 3 && (key.back() == L'\\' || key.back() == L'/')) {
+                    key.pop_back();
+                }
+
+                seen[key].push_back(SegmentLocation{scope_label, var.name, i});
+            }
+        }
+    };
+
+    process(machine_vars, L"Machine");
+    process(user_vars, L"User");
+
+    // Now flag duplicates
+    for (auto& [key, locations] : seen) {
+        if (locations.size() < 2) continue;
+
+        for (const auto& loc : locations) {
+            // Find the other locations
+            std::wstring others;
+            for (const auto& other : locations) {
+                if (&other == &loc) continue;
+                if (!others.empty()) others += L", ";
+                others += other.scope + L":" + other.var_name;
+            }
+
+            auto& vars{loc.scope == L"User" ? user_vars : machine_vars};
+            for (auto& var : vars) {
+                if (var.name == loc.var_name && loc.seg_index < var.segment_duplicate.size()) {
+                    var.segment_duplicate[loc.seg_index] = L"duplicate in " + others;
+                }
+            }
+        }
+    }
+}
+
 bool is_elevated() {
     BOOL elevated{FALSE};
     HANDLE token{nullptr};

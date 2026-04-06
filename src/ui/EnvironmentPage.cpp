@@ -229,12 +229,62 @@ void MarkDirty(Border const& wrapper, bool dirty) {
     }
 }
 
-void ApplySegmentStyle(TextBox const& cell, bool valid, std::wstring const& tooltip) {
+// Build ghost hint text from expanded value and duplicate info
+std::wstring BuildHintText(std::wstring const& expanded, std::wstring const& raw,
+                           std::wstring const& duplicate) {
+    std::wstring hint;
+    if (!expanded.empty() && expanded != raw) {
+        hint = L"\u2192 " + expanded;
+    }
+    if (!duplicate.empty()) {
+        if (!hint.empty()) hint += L"  ";
+        hint += L"\u26A0 " + duplicate;
+    }
+    return hint;
+}
+
+TextBlock MakeHintText(std::wstring const& text) {
+    auto hint{TextBlock{}};
+    hint.Text(text);
+    hint.FontSize(11);
+    hint.Opacity(0.45);
+    hint.TextTrimming(TextTrimming::CharacterEllipsis);
+    hint.IsHitTestVisible(false);
+    hint.Margin(ThicknessHelper::FromLengths(4, 0, 0, 0));
+    return hint;
+}
+
+void WireHintVisibility(TextBox const& cell, TextBlock const& hint) {
+    cell.GotFocus([hint]([[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                         [[maybe_unused]] RoutedEventArgs const& e) {
+        hint.Visibility(Visibility::Collapsed);
+    });
+    cell.LostFocus([hint]([[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                          [[maybe_unused]] RoutedEventArgs const& e) {
+        hint.Visibility(Visibility::Visible);
+    });
+}
+
+void ApplySegmentStyle(TextBox const& cell, bool valid,
+                       std::wstring const& tooltip, std::wstring const& duplicate) {
     if (!valid) {
         cell.Foreground(ThemeBrush(L"AccentTextFillColorPrimaryBrush"));
     }
-    if (!tooltip.empty()) {
-        ToolTipService::SetToolTip(cell, winrt::box_value(winrt::hstring{tooltip}));
+
+    // Build combined tooltip
+    std::wstring combined;
+    if (!tooltip.empty()) combined = tooltip;
+    if (!duplicate.empty()) {
+        if (!combined.empty()) combined += L"\n";
+        combined += L"\u26A0 " + duplicate;
+    }
+    if (!combined.empty()) {
+        ToolTipService::SetToolTip(cell, winrt::box_value(winrt::hstring{combined}));
+    }
+
+    // Visual marker for duplicates: italic
+    if (!duplicate.empty()) {
+        cell.FontStyle(winrt::Windows::UI::Text::FontStyle::Italic);
     }
 }
 
@@ -284,6 +334,7 @@ void EnvironmentPage::Refresh() {
     m_machineVariables = Environ::core::read_variables(Environ::core::Scope::Machine);
     Environ::core::expand_and_validate(m_userVariables);
     Environ::core::expand_and_validate(m_machineVariables);
+    Environ::core::detect_duplicates(m_userVariables, m_machineVariables);
 
     m_originalUserVariables = m_userVariables;
     m_originalMachineVariables = m_machineVariables;
@@ -580,13 +631,19 @@ void EnvironmentPage::RebuildRows() {
         name_cell.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
         WireScrollPassthrough(name_cell);
 
-        // Knowledge base tooltip
+        // Knowledge base description
         auto description{m_knowledgeBase.describe(variable.name)};
         if (!description.empty()) {
             ToolTipService::SetToolTip(name_cell, winrt::box_value(winrt::hstring{description}));
+            auto name_stack{StackPanel{}};
+            name_stack.Children().Append(name_cell);
+            auto hint{MakeHintText(description)};
+            WireHintVisibility(name_cell, hint);
+            name_stack.Children().Append(hint);
+            name_wrapper.Child(name_stack);
+        } else {
+            name_wrapper.Child(name_cell);
         }
-
-        name_wrapper.Child(name_cell);
         Grid::SetColumn(name_wrapper, 0);
 
         name_cell.GotFocus([this, row_border, scope = ref.scope, idx = ref.index](
@@ -650,16 +707,28 @@ void EnvironmentPage::RebuildRows() {
                 first_inner.Children().Append(browse_btn);
             }
 
-            first_wrapper.Child(first_inner);
-            Grid::SetColumn(first_wrapper, 2);
-
-            // Tooltip and invalid-path styling for segment 0
+            // Ghost hint text for first segment
+            std::wstring first_hint_text;
             if (!variable.expanded_segments.empty()) {
                 const auto& expanded{variable.expanded_segments[0]};
                 auto tooltip{variable.segments[0] != expanded ? expanded : std::wstring{}};
                 bool valid{!variable.segment_valid.empty() && variable.segment_valid[0]};
-                ApplySegmentStyle(first_cell, valid, tooltip);
+                auto dup{!variable.segment_duplicate.empty() ? variable.segment_duplicate[0] : std::wstring{}};
+                ApplySegmentStyle(first_cell, valid, tooltip, dup);
+                first_hint_text = BuildHintText(expanded, variable.segments[0], dup);
             }
+
+            if (!first_hint_text.empty()) {
+                auto first_stack{StackPanel{}};
+                first_stack.Children().Append(first_inner);
+                auto hint{MakeHintText(first_hint_text)};
+                WireHintVisibility(first_cell, hint);
+                first_stack.Children().Append(hint);
+                first_wrapper.Child(first_stack);
+            } else {
+                first_wrapper.Child(first_inner);
+            }
+            Grid::SetColumn(first_wrapper, 2);
 
             first_cell.GotFocus([this, row_border, scope = ref.scope, idx = ref.index](
                                     winrt::Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
@@ -693,6 +762,8 @@ void EnvironmentPage::RebuildRows() {
             auto value_cell{MakeCell(variable.value, is_protected)};
             WireScrollPassthrough(value_cell);
 
+            // Build the cell content (with optional browse button)
+            winrt::Microsoft::UI::Xaml::UIElement val_content{value_cell};
             if (!is_protected && LooksLikePath(variable.value)) {
                 auto val_inner{Grid{}};
                 auto val_text_col{ColumnDefinition{}};
@@ -715,16 +786,27 @@ void EnvironmentPage::RebuildRows() {
                     }
                 });
                 val_inner.Children().Append(browse_btn);
-                value_wrapper.Child(val_inner);
-            } else {
-                value_wrapper.Child(value_cell);
+                val_content = val_inner;
             }
-            Grid::SetColumn(value_wrapper, 2);
 
-            // Tooltip for expanded value
+            // Ghost hint for expanded scalar values
+            std::wstring scalar_hint;
             if (variable.is_expandable && variable.expanded_value != variable.value) {
                 ToolTipService::SetToolTip(value_cell, winrt::box_value(winrt::hstring{variable.expanded_value}));
+                scalar_hint = L"\u2192 " + variable.expanded_value;
             }
+
+            if (!scalar_hint.empty()) {
+                auto val_stack{StackPanel{}};
+                val_stack.Children().Append(val_content);
+                auto hint{MakeHintText(scalar_hint)};
+                WireHintVisibility(value_cell, hint);
+                val_stack.Children().Append(hint);
+                value_wrapper.Child(val_stack);
+            } else {
+                value_wrapper.Child(val_content);
+            }
+            Grid::SetColumn(value_wrapper, 2);
 
             value_cell.GotFocus([this, row_border, scope = ref.scope, idx = ref.index](
                                     winrt::Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
@@ -814,16 +896,28 @@ void EnvironmentPage::RebuildRows() {
                     seg_inner.Children().Append(browse_btn);
                 }
 
-                seg_wrapper.Child(seg_inner);
-                Grid::SetColumn(seg_wrapper, 2);
-
-                // Tooltip and invalid-path styling
+                // Ghost hint for continuation segment
+                std::wstring seg_hint_text;
                 if (seg_i < variable.expanded_segments.size()) {
                     const auto& expanded{variable.expanded_segments[seg_i]};
                     auto tooltip{variable.segments[seg_i] != expanded ? expanded : std::wstring{}};
                     bool valid{seg_i < variable.segment_valid.size() && variable.segment_valid[seg_i]};
-                    ApplySegmentStyle(seg_cell, valid, tooltip);
+                    auto dup{seg_i < variable.segment_duplicate.size() ? variable.segment_duplicate[seg_i] : std::wstring{}};
+                    ApplySegmentStyle(seg_cell, valid, tooltip, dup);
+                    seg_hint_text = BuildHintText(expanded, variable.segments[seg_i], dup);
                 }
+
+                if (!seg_hint_text.empty()) {
+                    auto seg_stack{StackPanel{}};
+                    seg_stack.Children().Append(seg_inner);
+                    auto hint{MakeHintText(seg_hint_text)};
+                    WireHintVisibility(seg_cell, hint);
+                    seg_stack.Children().Append(hint);
+                    seg_wrapper.Child(seg_stack);
+                } else {
+                    seg_wrapper.Child(seg_inner);
+                }
+                Grid::SetColumn(seg_wrapper, 2);
 
                 seg_cell.GotFocus([this, row_border, scope = ref.scope, idx = ref.index](
                                       winrt::Windows::Foundation::IInspectable const& sender, RoutedEventArgs const&) {
