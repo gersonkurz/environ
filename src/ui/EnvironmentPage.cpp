@@ -87,12 +87,17 @@ Border MakeScopeBadge(Environ::core::Scope scope) {
     if (scope == Environ::core::Scope::User) {
         auto accent{winrt::unbox_value<winrt::Windows::UI::Color>(
             Application::Current().Resources().Lookup(winrt::box_value(L"SystemAccentColor")))};
+        // Subtle tinted background
         accent.A = 30;
         badge.Background(SolidColorBrush{accent});
-        text.Foreground(ThemeBrush(L"AccentTextFillColorPrimaryBrush"));
+        // Full accent for text
+        accent.A = 255;
+        text.Foreground(SolidColorBrush{accent});
     } else {
-        badge.Background(ThemeBrush(L"ControlFillColorSecondaryBrush"));
-        text.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+        // Neutral: just use reduced opacity on the whole badge
+        badge.Opacity(0.7);
+        badge.BorderThickness(ThicknessHelper::FromUniformLength(1));
+        badge.BorderBrush(SolidColorBrush{winrt::Windows::UI::ColorHelper::FromArgb(40, 128, 128, 128)});
     }
 
     badge.Child(text);
@@ -262,13 +267,12 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     title_text.Text(L"Environment Variables");
     title_text.FontSize(20);
     title_text.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-    title_text.Foreground(ThemeBrush(L"TextFillColorPrimaryBrush"));
 
     auto count_text{TextBlock{}};
     count_text.Text(std::to_wstring(refs.size()));
     count_text.FontSize(12);
     count_text.VerticalAlignment(VerticalAlignment::Center);
-    count_text.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    count_text.Opacity(0.6);
 
     title_panel.Children().Append(title_text);
     title_panel.Children().Append(count_text);
@@ -315,21 +319,21 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     name_header.Text(L"Name");
     name_header.FontSize(12);
     name_header.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-    name_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    name_header.Opacity(0.6);
     Grid::SetColumn(name_header, 0);
 
     auto scope_header{TextBlock{}};
     scope_header.Text(L"Scope");
     scope_header.FontSize(12);
     scope_header.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-    scope_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    scope_header.Opacity(0.6);
     Grid::SetColumn(scope_header, 1);
 
     auto value_header{TextBlock{}};
     value_header.Text(L"Value");
     value_header.FontSize(12);
     value_header.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-    value_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    value_header.Opacity(0.6);
     Grid::SetColumn(value_header, 2);
 
     header_grid.Children().Append(name_header);
@@ -665,7 +669,7 @@ void EnvironmentPage::OnHistory() {
     auto detail_header{TextBlock{}};
     detail_header.Text(L"Select a snapshot to see changes");
     detail_header.FontSize(12);
-    detail_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    detail_header.Opacity(0.6);
     detail_header.FontStyle(winrt::Windows::UI::Text::FontStyle::Italic);
     detail_panel.Children().Append(detail_header);
 
@@ -697,7 +701,7 @@ void EnvironmentPage::OnHistory() {
         ts_text.Text(winrt::to_hstring(snap.timestamp));
         ts_text.FontSize(12);
         ts_text.VerticalAlignment(VerticalAlignment::Center);
-        ts_text.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+        ts_text.Opacity(0.6);
         Grid::SetColumn(ts_text, 0);
 
         auto label_text{TextBlock{}};
@@ -870,7 +874,7 @@ void EnvironmentPage::OnSave() {
     auto label_header{TextBlock{}};
     label_header.Text(L"Snapshot label:");
     label_header.FontSize(12);
-    label_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    label_header.Opacity(0.6);
     outer_panel.Children().Append(label_header);
 
     auto label_box{TextBox{}};
@@ -882,7 +886,7 @@ void EnvironmentPage::OnSave() {
     auto changes_header{TextBlock{}};
     changes_header.Text(L"Changes to apply:");
     changes_header.FontSize(12);
-    changes_header.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
+    changes_header.Opacity(0.6);
     changes_header.Margin(ThicknessHelper::FromLengths(0, 4, 0, 0));
     outer_panel.Children().Append(changes_header);
 

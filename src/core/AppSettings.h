@@ -36,6 +36,17 @@ struct AppSettings : public Section {
 
     } window{this};
 
+    struct AppearanceSettings : public Section {
+        AppearanceSettings(Section* parent)
+            : Section{parent, "Appearance"}
+        {
+        }
+
+        // "System", "Light", or "Dark"
+        TypedValue<std::string> theme{this, "Theme", "System"};
+
+    } appearance{this};
+
 private:
     std::unique_ptr<pnq::config::TomlBackend> m_backend;
 

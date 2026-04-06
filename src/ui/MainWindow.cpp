@@ -11,6 +11,18 @@ MainWindow::MainWindow() {
     });
 }
 
+void MainWindow::ApplyTheme() {
+    auto theme_str{m_settings.appearance.theme.get()};
+    winrt::Microsoft::UI::Xaml::ElementTheme theme{winrt::Microsoft::UI::Xaml::ElementTheme::Default};
+    if (theme_str == "Light") {
+        theme = winrt::Microsoft::UI::Xaml::ElementTheme::Light;
+    } else if (theme_str == "Dark") {
+        theme = winrt::Microsoft::UI::Xaml::ElementTheme::Dark;
+    }
+
+    m_navView.RequestedTheme(theme);
+}
+
 void MainWindow::RestoreWindowPlacement() {
     auto app_window{AppWindow()};
 
@@ -64,6 +76,9 @@ void MainWindow::InitializeComponent() {
     m_navView.IsSettingsVisible(false);
     m_navView.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);
 
+    // Apply theme BEFORE creating pages so ThemeBrush lookups resolve correctly
+    ApplyTheme();
+
     auto envItem{NavigationViewItem{}};
     envItem.Content(winrt::box_value(L"Environment"));
     auto globeIcon{FontIcon{}};
@@ -90,6 +105,11 @@ void MainWindow::InitializeComponent() {
     m_navView.FooterMenuItems().Append(aboutItem);
 
     m_envPage = std::make_unique<EnvironmentPage>();
+    m_settingsPage = std::make_unique<SettingsPage>(m_settings, [this]() {
+        ApplyTheme();
+        m_envPage->Refresh();
+    });
+
     m_navView.Content(m_envPage->Root());
     m_navView.SelectedItem(envItem);
 
@@ -102,7 +122,7 @@ void MainWindow::InitializeComponent() {
             if (tag == L"env") {
                 m_navView.Content(m_envPage->Root());
             } else if (tag == L"settings") {
-                m_navView.Content(MakePlaceholder(L"Settings — coming soon"));
+                m_navView.Content(m_settingsPage->Root());
             } else if (tag == L"about") {
                 m_navView.Content(MakePlaceholder(L"About — coming soon"));
             }

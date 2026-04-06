@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "EnvironmentPage.h"
+#include "SettingsPage.h"
 
 struct MainWindow
     : winrt::Microsoft::UI::Xaml::WindowT<
@@ -29,10 +30,12 @@ private:
     winrt::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider m_provider;
     winrt::Microsoft::UI::Xaml::Controls::NavigationView m_navView;
     std::unique_ptr<EnvironmentPage> m_envPage;
+    std::unique_ptr<SettingsPage> m_settingsPage;
     Environ::core::AppSettings m_settings;
 
     void RestoreWindowPlacement();
     void SaveWindowPlacement();
+    void ApplyTheme();
 
     winrt::Microsoft::UI::Xaml::Controls::TextBlock MakePlaceholder(winrt::hstring const& text);
 };
