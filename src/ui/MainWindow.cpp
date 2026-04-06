@@ -73,11 +73,38 @@ void MainWindow::InitializeComponent() {
 
     Title(L"Environ");
     SystemBackdrop(MicaBackdrop{});
+    ExtendsContentIntoTitleBar(true);
+
+    // Custom title bar: just a draggable area with the app name
+    auto title_bar{Grid{}};
+    title_bar.Height(48);
+    title_bar.Padding(ThicknessHelper::FromLengths(16, 0, 0, 0));
+
+    auto title_icon{FontIcon{}};
+    title_icon.Glyph(L"\uE774");
+    title_icon.FontSize(14);
+    title_icon.VerticalAlignment(VerticalAlignment::Center);
+    title_icon.Margin(ThicknessHelper::FromLengths(0, 0, 8, 0));
+
+    auto title_label{TextBlock{}};
+    title_label.Text(L"Environ");
+    title_label.FontSize(13);
+    title_label.VerticalAlignment(VerticalAlignment::Center);
+
+    auto title_content{StackPanel{}};
+    title_content.Orientation(Orientation::Horizontal);
+    title_content.VerticalAlignment(VerticalAlignment::Center);
+    title_content.Children().Append(title_icon);
+    title_content.Children().Append(title_label);
+    title_bar.Children().Append(title_content);
+
+    SetTitleBar(title_bar);
 
     // -- NavigationView --------------------------------------------------
     m_navView = NavigationView{};
     m_navView.IsSettingsVisible(false);
     m_navView.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);
+    m_navView.IsTitleBarAutoPaddingEnabled(true);
 
     // Apply theme BEFORE creating pages so ThemeBrush lookups resolve correctly
     ApplyTheme();
@@ -138,7 +165,21 @@ void MainWindow::InitializeComponent() {
             }
         });
 
-    Content(m_navView);
+    // Stack title bar above navigation view
+    auto root_grid{Grid{}};
+    auto title_row{RowDefinition{}};
+    title_row.Height(GridLengthHelper::Auto());
+    auto content_row{RowDefinition{}};
+    content_row.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    root_grid.RowDefinitions().Append(title_row);
+    root_grid.RowDefinitions().Append(content_row);
+
+    Grid::SetRow(title_bar, 0);
+    Grid::SetRow(m_navView, 1);
+    root_grid.Children().Append(title_bar);
+    root_grid.Children().Append(m_navView);
+
+    Content(root_grid);
 }
 
 winrt::Microsoft::UI::Xaml::Controls::TextBlock
