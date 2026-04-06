@@ -185,6 +185,28 @@ EnvironmentPage::EnvironmentPage(HWND owner_hwnd)
 {
     m_root = Grid{};
     m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
+    m_root.Background(SolidColorBrush{winrt::Windows::UI::Colors::Transparent()});
+
+    // Catch-all: wheel anywhere on the page scrolls the variable list
+    m_root.PointerWheelChanged([this](winrt::Windows::Foundation::IInspectable const&,
+                                      winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+        if (!m_scrollViewer) return;
+
+        const auto point{args.GetCurrentPoint(m_scrollViewer)};
+        const auto delta{point.Properties().MouseWheelDelta()};
+        const bool ctrl{(static_cast<uint32_t>(args.KeyModifiers()) &
+                        static_cast<uint32_t>(winrt::Windows::System::VirtualKeyModifiers::Control)) != 0};
+
+        if (ctrl) {
+            const auto step{static_cast<float>(delta) / 120.0f * 0.1f};
+            const auto new_zoom{std::clamp(m_scrollViewer.ZoomFactor() + step, 0.5f, 3.0f)};
+            m_scrollViewer.ChangeView(nullptr, nullptr, new_zoom);
+        } else {
+            m_scrollViewer.ChangeView(nullptr, m_scrollViewer.VerticalOffset() - static_cast<double>(delta), nullptr, true);
+        }
+        args.Handled(true);
+    });
+
     m_elevated = Environ::core::is_elevated();
     m_snapshotStore.open();
     Refresh();
