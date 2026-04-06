@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pch.h"
+#include "../core/AppSettings.h"
 
 #include <memory>
 
@@ -28,6 +29,10 @@ private:
     winrt::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider m_provider;
     winrt::Microsoft::UI::Xaml::Controls::NavigationView m_navView;
     std::unique_ptr<EnvironmentPage> m_envPage;
+    Environ::core::AppSettings m_settings;
+
+    void RestoreWindowPlacement();
+    void SaveWindowPlacement();
 
     winrt::Microsoft::UI::Xaml::Controls::TextBlock MakePlaceholder(winrt::hstring const& text);
 };

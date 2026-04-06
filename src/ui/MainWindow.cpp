@@ -1,7 +1,54 @@
 #include "MainWindow.h"
 
 MainWindow::MainWindow() {
+    m_settings.load();
     InitializeComponent();
+    RestoreWindowPlacement();
+
+    Closed([this]([[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                  [[maybe_unused]] winrt::Microsoft::UI::Xaml::WindowEventArgs const& args) {
+        SaveWindowPlacement();
+    });
+}
+
+void MainWindow::RestoreWindowPlacement() {
+    auto app_window{AppWindow()};
+
+    auto width{m_settings.window.width.get()};
+    auto height{m_settings.window.height.get()};
+    if (width > 0 && height > 0) {
+        app_window.Resize({width, height});
+    }
+
+    auto x{m_settings.window.x.get()};
+    auto y{m_settings.window.y.get()};
+    if (x >= 0 && y >= 0) {
+        app_window.Move({x, y});
+    }
+
+    if (m_settings.window.maximized.get()) {
+        auto presenter{app_window.Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>()};
+        presenter.Maximize();
+    }
+}
+
+void MainWindow::SaveWindowPlacement() {
+    auto app_window{AppWindow()};
+    auto presenter{app_window.Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>()};
+
+    bool maximized{presenter.State() == winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Maximized};
+    m_settings.window.maximized.set(maximized);
+
+    if (!maximized) {
+        auto pos{app_window.Position()};
+        auto size{app_window.Size()};
+        m_settings.window.x.set(pos.X);
+        m_settings.window.y.set(pos.Y);
+        m_settings.window.width.set(size.Width);
+        m_settings.window.height.set(size.Height);
+    }
+
+    m_settings.save();
 }
 
 void MainWindow::InitializeComponent() {
