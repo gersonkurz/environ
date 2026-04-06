@@ -213,6 +213,18 @@ Button MakeBrowseButton() {
     return btn;
 }
 
+Button MakeDeleteButton() {
+    auto btn{Button{}};
+    auto icon{FontIcon{}};
+    icon.Glyph(L"\uE74D"); // Delete
+    icon.FontSize(12);
+    btn.Content(icon);
+    btn.Padding(ThicknessHelper::FromLengths(4, 2, 4, 2));
+    btn.VerticalAlignment(VerticalAlignment::Center);
+    btn.Margin(ThicknessHelper::FromLengths(2, 0, 0, 0));
+    return btn;
+}
+
 Border MakeValueWrapper() {
     auto wrapper{Border{}};
     wrapper.BorderThickness(ThicknessHelper::FromLengths(0, 0, 0, 0));
@@ -625,7 +637,7 @@ void EnvironmentPage::RebuildRows() {
         auto row_grid{Grid{}};
         ApplyColumnDefinitions(row_grid);
 
-        // Name cell
+        // Name cell with delete button
         auto name_wrapper{MakeValueWrapper()};
         auto name_cell{MakeCell(variable.name, is_protected)};
         name_cell.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
@@ -686,10 +698,13 @@ void EnvironmentPage::RebuildRows() {
             auto first_inner{Grid{}};
             auto first_text_col{ColumnDefinition{}};
             first_text_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
-            auto first_btn_col{ColumnDefinition{}};
-            first_btn_col.Width(GridLengthHelper::Auto());
+            auto first_browse_col{ColumnDefinition{}};
+            first_browse_col.Width(GridLengthHelper::Auto());
+            auto first_del_col{ColumnDefinition{}};
+            first_del_col.Width(GridLengthHelper::Auto());
             first_inner.ColumnDefinitions().Append(first_text_col);
-            first_inner.ColumnDefinitions().Append(first_btn_col);
+            first_inner.ColumnDefinitions().Append(first_browse_col);
+            first_inner.ColumnDefinitions().Append(first_del_col);
             Grid::SetColumn(first_cell, 0);
             first_inner.Children().Append(first_cell);
 
@@ -705,6 +720,20 @@ void EnvironmentPage::RebuildRows() {
                     }
                 });
                 first_inner.Children().Append(browse_btn);
+
+                auto del_btn{MakeDeleteButton()};
+                Grid::SetColumn(del_btn, 2);
+                del_btn.Click([this, scope = ref.scope, idx = ref.index](
+                                  [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                  [[maybe_unused]] RoutedEventArgs const& args) {
+                    auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                    if (idx < vars.size() && !vars[idx].segments.empty()) {
+                        vars[idx].segments.erase(vars[idx].segments.begin());
+                        vars[idx].value = JoinSegments(vars[idx].segments);
+                        RebuildRows();
+                    }
+                });
+                first_inner.Children().Append(del_btn);
             }
 
             // Ghost hint text for first segment
@@ -762,21 +791,22 @@ void EnvironmentPage::RebuildRows() {
             auto value_cell{MakeCell(variable.value, is_protected)};
             WireScrollPassthrough(value_cell);
 
-            // Build the cell content (with optional browse button)
-            winrt::Microsoft::UI::Xaml::UIElement val_content{value_cell};
+            // Build the cell content (with optional browse + delete buttons)
+            auto val_inner{Grid{}};
+            auto val_text_col{ColumnDefinition{}};
+            val_text_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+            val_inner.ColumnDefinitions().Append(val_text_col);
+            Grid::SetColumn(value_cell, 0);
+            val_inner.Children().Append(value_cell);
+
+            int val_col_idx{1};
             if (!is_protected && LooksLikePath(variable.value)) {
-                auto val_inner{Grid{}};
-                auto val_text_col{ColumnDefinition{}};
-                val_text_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
-                auto val_btn_col{ColumnDefinition{}};
-                val_btn_col.Width(GridLengthHelper::Auto());
-                val_inner.ColumnDefinitions().Append(val_text_col);
-                val_inner.ColumnDefinitions().Append(val_btn_col);
-                Grid::SetColumn(value_cell, 0);
-                val_inner.Children().Append(value_cell);
+                auto browse_col{ColumnDefinition{}};
+                browse_col.Width(GridLengthHelper::Auto());
+                val_inner.ColumnDefinitions().Append(browse_col);
 
                 auto browse_btn{MakeBrowseButton()};
-                Grid::SetColumn(browse_btn, 1);
+                Grid::SetColumn(browse_btn, val_col_idx++);
                 browse_btn.Click([this, value_cell](
                                      [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
                                      [[maybe_unused]] RoutedEventArgs const& args) {
@@ -786,8 +816,28 @@ void EnvironmentPage::RebuildRows() {
                     }
                 });
                 val_inner.Children().Append(browse_btn);
-                val_content = val_inner;
             }
+
+            if (!is_protected) {
+                auto del_col{ColumnDefinition{}};
+                del_col.Width(GridLengthHelper::Auto());
+                val_inner.ColumnDefinitions().Append(del_col);
+
+                auto del_btn{MakeDeleteButton()};
+                Grid::SetColumn(del_btn, val_col_idx);
+                del_btn.Click([this, scope = ref.scope, idx = ref.index](
+                                  [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                  [[maybe_unused]] RoutedEventArgs const& args) {
+                    auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                    if (idx < vars.size()) {
+                        vars.erase(vars.begin() + static_cast<std::ptrdiff_t>(idx));
+                        RebuildRows();
+                    }
+                });
+                val_inner.Children().Append(del_btn);
+            }
+
+            winrt::Microsoft::UI::Xaml::UIElement val_content{val_inner};
 
             // Ghost hint for expanded scalar values
             std::wstring scalar_hint;
@@ -875,10 +925,13 @@ void EnvironmentPage::RebuildRows() {
                 auto seg_inner{Grid{}};
                 auto seg_text_col{ColumnDefinition{}};
                 seg_text_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
-                auto seg_btn_col{ColumnDefinition{}};
-                seg_btn_col.Width(GridLengthHelper::Auto());
+                auto seg_browse_col{ColumnDefinition{}};
+                seg_browse_col.Width(GridLengthHelper::Auto());
+                auto seg_del_col{ColumnDefinition{}};
+                seg_del_col.Width(GridLengthHelper::Auto());
                 seg_inner.ColumnDefinitions().Append(seg_text_col);
-                seg_inner.ColumnDefinitions().Append(seg_btn_col);
+                seg_inner.ColumnDefinitions().Append(seg_browse_col);
+                seg_inner.ColumnDefinitions().Append(seg_del_col);
                 Grid::SetColumn(seg_cell, 0);
                 seg_inner.Children().Append(seg_cell);
 
@@ -894,6 +947,20 @@ void EnvironmentPage::RebuildRows() {
                         }
                     });
                     seg_inner.Children().Append(browse_btn);
+
+                    auto del_btn{MakeDeleteButton()};
+                    Grid::SetColumn(del_btn, 2);
+                    del_btn.Click([this, scope = ref.scope, idx = ref.index, seg_i](
+                                      [[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                                      [[maybe_unused]] RoutedEventArgs const& args) {
+                        auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+                        if (idx < vars.size() && seg_i < vars[idx].segments.size()) {
+                            vars[idx].segments.erase(vars[idx].segments.begin() + static_cast<std::ptrdiff_t>(seg_i));
+                            vars[idx].value = JoinSegments(vars[idx].segments);
+                            RebuildRows();
+                        }
+                    });
+                    seg_inner.Children().Append(del_btn);
                 }
 
                 // Ghost hint for continuation segment
