@@ -83,7 +83,7 @@ void MainWindow::InitializeComponent() {
     ApplyTheme();
 
     auto envItem{NavigationViewItem{}};
-    envItem.Content(winrt::box_value(L"Environment"));
+    envItem.Content(winrt::box_value(L"Environ"));
     auto globeIcon{FontIcon{}};
     globeIcon.Glyph(L"\uE774");
     envItem.Icon(globeIcon);

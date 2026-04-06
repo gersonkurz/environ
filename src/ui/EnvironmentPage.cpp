@@ -315,7 +315,7 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     title_panel.Spacing(8);
 
     auto title_text{TextBlock{}};
-    title_text.Text(L"Environment Variables");
+    title_text.Text(L"Environ");
     title_text.FontSize(20);
     title_text.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
 
