@@ -1,9 +1,13 @@
 #include "EnvironmentPage.h"
+#include "../core/EnvExport.h"
 #include "../core/EnvWriter.h"
 
 #include <pnq/unicode.h>
 
 #include <algorithm>
+#include <fstream>
+
+#include <commdlg.h>
 
 using namespace winrt::Microsoft::UI::Xaml;
 using namespace winrt::Microsoft::UI::Xaml::Controls;
@@ -176,7 +180,9 @@ void ApplySegmentStyle(TextBox const& cell, bool valid, std::wstring const& tool
 
 } // namespace
 
-EnvironmentPage::EnvironmentPage() {
+EnvironmentPage::EnvironmentPage(HWND owner_hwnd)
+    : m_ownerHwnd{owner_hwnd}
+{
     m_root = Grid{};
     m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
     m_elevated = Environ::core::is_elevated();
@@ -341,8 +347,16 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         OnHistory();
     });
 
+    auto export_btn{Button{}};
+    export_btn.Content(winrt::box_value(L"Export"));
+    export_btn.Click([this]([[maybe_unused]] winrt::Windows::Foundation::IInspectable const& sender,
+                            [[maybe_unused]] RoutedEventArgs const& args) {
+        OnExport();
+    });
+
     toolbar.Children().Append(save_btn);
     toolbar.Children().Append(history_btn);
+    toolbar.Children().Append(export_btn);
     Grid::SetColumn(toolbar, 2);
 
     title_grid.Children().Append(title_panel);
@@ -692,6 +706,43 @@ void EnvironmentPage::RebuildRows() {
         }
     }
 
+}
+
+void EnvironmentPage::OnExport() {
+    wchar_t filename[MAX_PATH]{L"environ.toml"};
+
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = m_ownerHwnd;
+    ofn.lpstrFilter = L"TOML Files (*.toml)\0*.toml\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = L"toml";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+
+    if (!GetSaveFileNameW(&ofn)) return;
+
+    auto toml{Environ::core::export_toml(m_userVariables, m_machineVariables)};
+
+    std::ofstream file{filename, std::ios::binary};
+    if (file.is_open()) {
+        file.write(toml.data(), static_cast<std::streamsize>(toml.size()));
+        file.close();
+
+        auto dlg{ContentDialog{}};
+        dlg.Title(winrt::box_value(L"Export Complete"));
+        dlg.Content(winrt::box_value(winrt::hstring{std::wstring{L"Saved to "} + filename}));
+        dlg.CloseButtonText(L"OK");
+        dlg.XamlRoot(m_root.XamlRoot());
+        dlg.ShowAsync();
+    } else {
+        auto dlg{ContentDialog{}};
+        dlg.Title(winrt::box_value(L"Export Failed"));
+        dlg.Content(winrt::box_value(winrt::hstring{std::wstring{L"Could not write to "} + filename}));
+        dlg.CloseButtonText(L"OK");
+        dlg.XamlRoot(m_root.XamlRoot());
+        dlg.ShowAsync();
+    }
 }
 
 void EnvironmentPage::OnHistory() {

@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include <microsoft.ui.xaml.window.h>
 #include <shellapi.h>
 
 MainWindow::MainWindow() {
@@ -106,7 +107,14 @@ void MainWindow::InitializeComponent() {
     m_navView.FooterMenuItems().Append(settingsItem);
     m_navView.FooterMenuItems().Append(aboutItem);
 
-    m_envPage = std::make_unique<EnvironmentPage>();
+    // Get HWND for file dialogs
+    HWND hwnd{nullptr};
+    auto interop{this->try_as<IWindowNative>()};
+    if (interop) {
+        interop->get_WindowHandle(&hwnd);
+    }
+
+    m_envPage = std::make_unique<EnvironmentPage>(hwnd);
     m_settingsPage = std::make_unique<SettingsPage>(m_settings, [this]() {
         ApplyTheme();
         m_envPage->Refresh();

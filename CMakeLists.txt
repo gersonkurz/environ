@@ -102,6 +102,7 @@ add_executable(${TARGET} WIN32
     src/ui/SettingsPage.cpp       src/ui/SettingsPage.h
     src/ui/EnvironmentPage.cpp    src/ui/EnvironmentPage.h
     src/core/AppSettings.cpp      src/core/AppSettings.h
+    src/core/EnvExport.cpp        src/core/EnvExport.h
     src/core/EnvStore.cpp         src/core/EnvStore.h
     src/core/EnvWriter.cpp        src/core/EnvWriter.h
     src/core/SnapshotStore.cpp    src/core/SnapshotStore.h

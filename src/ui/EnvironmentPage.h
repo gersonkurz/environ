@@ -8,7 +8,7 @@
 
 class EnvironmentPage {
 public:
-    EnvironmentPage();
+    EnvironmentPage(HWND owner_hwnd = nullptr);
 
     winrt::Microsoft::UI::Xaml::UIElement Root() const;
     void Refresh();
@@ -28,6 +28,7 @@ private:
     std::vector<Environ::core::EnvVariable> m_originalUserVariables;
     std::vector<Environ::core::EnvVariable> m_originalMachineVariables;
     std::optional<SelectedVariable> m_selectedVariable;
+    HWND m_ownerHwnd{nullptr};
     bool m_elevated{false};
     std::wstring m_filterText;
     Environ::core::SnapshotStore m_snapshotStore;
@@ -39,5 +40,6 @@ private:
     void WireScrollPassthrough(winrt::Microsoft::UI::Xaml::Controls::TextBox const& text_box);
     void RebuildRows();
     void OnSave();
+    void OnExport();
     void OnHistory();
 };
