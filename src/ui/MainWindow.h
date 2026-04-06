@@ -2,6 +2,7 @@
 
 #include "pch.h"
 #include "../core/AppSettings.h"
+#include "../core/KnowledgeBase.h"
 #include "../core/SnapshotStore.h"
 
 #include <memory>
@@ -36,6 +37,7 @@ private:
     std::unique_ptr<SettingsPage> m_settingsPage;
     Environ::core::AppSettings m_settings;
     Environ::core::SnapshotStore m_snapshotStore;
+    Environ::core::KnowledgeBase m_knowledgeBase;
 
     void RestoreWindowPlacement();
     void SaveWindowPlacement();

@@ -1,11 +1,21 @@
 #include "MainWindow.h"
 
+#include <filesystem>
+
 #include <microsoft.ui.xaml.window.h>
 #include <shellapi.h>
 
 MainWindow::MainWindow() {
     m_settings.load();
     m_snapshotStore.open();
+
+    // Load knowledge.toml from next to the executable
+    wchar_t exe_path[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    std::filesystem::path knowledge_path{exe_path};
+    knowledge_path.replace_filename(L"knowledge.toml");
+    m_knowledgeBase.load(knowledge_path.string());
+
     InitializeComponent();
     RestoreWindowPlacement();
 
@@ -161,7 +171,7 @@ void MainWindow::InitializeComponent() {
         interop->get_WindowHandle(&hwnd);
     }
 
-    m_envPage = std::make_unique<EnvironmentPage>(m_snapshotStore, hwnd);
+    m_envPage = std::make_unique<EnvironmentPage>(m_snapshotStore, m_knowledgeBase, hwnd);
     m_historyPage = std::make_unique<HistoryPage>(m_snapshotStore, [this]() {
         m_envPage->Refresh();
     });

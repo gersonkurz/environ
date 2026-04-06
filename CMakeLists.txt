@@ -104,6 +104,7 @@ add_executable(${TARGET} WIN32
     src/ui/EnvironmentPage.cpp    src/ui/EnvironmentPage.h
     src/core/AppSettings.cpp      src/core/AppSettings.h
     src/core/EnvExport.cpp        src/core/EnvExport.h
+    src/core/KnowledgeBase.cpp    src/core/KnowledgeBase.h
     src/core/EnvStore.cpp         src/core/EnvStore.h
     src/core/EnvWriter.cpp        src/core/EnvWriter.h
     src/core/SnapshotStore.cpp    src/core/SnapshotStore.h
@@ -168,4 +169,12 @@ add_custom_command(TARGET ${TARGET} POST_BUILD
         -DDST="$<TARGET_FILE_DIR:${TARGET}>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/copy-runtime.cmake"
     COMMENT "Copying Windows App SDK runtime files"
+)
+
+# Copy knowledge.toml next to the executable
+add_custom_command(TARGET ${TARGET} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/knowledge.toml"
+        "$<TARGET_FILE_DIR:${TARGET}>/knowledge.toml"
+    COMMENT "Copying knowledge.toml"
 )

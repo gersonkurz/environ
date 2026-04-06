@@ -2,13 +2,16 @@
 
 #include "pch.h"
 #include "../core/EnvStore.h"
+#include "../core/KnowledgeBase.h"
 #include "../core/SnapshotStore.h"
 
 #include <optional>
 
 class EnvironmentPage {
 public:
-    EnvironmentPage(Environ::core::SnapshotStore& snapshot_store, HWND owner_hwnd = nullptr);
+    EnvironmentPage(Environ::core::SnapshotStore& snapshot_store,
+                    Environ::core::KnowledgeBase const& knowledge_base,
+                    HWND owner_hwnd = nullptr);
 
     winrt::Microsoft::UI::Xaml::UIElement Root() const;
     void Refresh();
@@ -32,6 +35,7 @@ private:
     bool m_elevated{false};
     std::wstring m_filterText;
     Environ::core::SnapshotStore& m_snapshotStore;
+    Environ::core::KnowledgeBase const& m_knowledgeBase;
 
     void EnsureSelection();
     void BuildList(winrt::Microsoft::UI::Xaml::Controls::Grid const& parent);

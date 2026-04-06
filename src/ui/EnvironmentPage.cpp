@@ -240,8 +240,11 @@ void ApplySegmentStyle(TextBox const& cell, bool valid, std::wstring const& tool
 
 } // namespace
 
-EnvironmentPage::EnvironmentPage(Environ::core::SnapshotStore& snapshot_store, HWND owner_hwnd)
+EnvironmentPage::EnvironmentPage(Environ::core::SnapshotStore& snapshot_store,
+                                 Environ::core::KnowledgeBase const& knowledge_base,
+                                 HWND owner_hwnd)
     : m_snapshotStore{snapshot_store}
+    , m_knowledgeBase{knowledge_base}
     , m_ownerHwnd{owner_hwnd}
 {
     m_root = Grid{};
@@ -576,6 +579,13 @@ void EnvironmentPage::RebuildRows() {
         auto name_cell{MakeCell(variable.name, is_protected)};
         name_cell.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
         WireScrollPassthrough(name_cell);
+
+        // Knowledge base tooltip
+        auto description{m_knowledgeBase.describe(variable.name)};
+        if (!description.empty()) {
+            ToolTipService::SetToolTip(name_cell, winrt::box_value(winrt::hstring{description}));
+        }
+
         name_wrapper.Child(name_cell);
         Grid::SetColumn(name_wrapper, 0);
 
