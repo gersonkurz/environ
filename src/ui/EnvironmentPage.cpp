@@ -51,6 +51,26 @@ std::wstring JoinSegments(std::vector<std::wstring> const& segments) {
     return result;
 }
 
+bool ContainsCaseInsensitive(std::wstring const& haystack, std::wstring const& needle) {
+    auto it{std::ranges::search(haystack, needle, [](wchar_t a, wchar_t b) {
+        return ::towlower(a) == ::towlower(b);
+    })};
+    return !it.empty();
+}
+
+bool MatchesFilter(Environ::core::EnvVariable const& var, std::wstring const& filter) {
+    if (filter.empty()) return true;
+    if (ContainsCaseInsensitive(var.name, filter)) return true;
+    if (ContainsCaseInsensitive(var.value, filter)) return true;
+    return false;
+}
+
+bool SegmentMatchesFilter(std::wstring const& segment, std::wstring const& filter,
+                          bool name_matches) {
+    if (filter.empty() || name_matches) return true;
+    return ContainsCaseInsensitive(segment, filter);
+}
+
 std::vector<VariableRef> BuildVariableRefs(
     std::vector<Environ::core::EnvVariable> const& user_variables,
     std::vector<Environ::core::EnvVariable> const& machine_variables) {
@@ -249,14 +269,17 @@ void EnvironmentPage::BuildList(Grid const& parent) {
 
     auto refs{BuildVariableRefs(m_userVariables, m_machineVariables)};
 
-    // --- Title row (title + toolbar) ---
+    // --- Title row (title + filter + toolbar) ---
     auto title_grid{Grid{}};
     title_grid.Margin(ThicknessHelper::FromLengths(0, 0, 0, 12));
     auto title_left_col{ColumnDefinition{}};
-    title_left_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    title_left_col.Width(GridLengthHelper::Auto());
+    auto title_filter_col{ColumnDefinition{}};
+    title_filter_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
     auto title_right_col{ColumnDefinition{}};
     title_right_col.Width(GridLengthHelper::Auto());
     title_grid.ColumnDefinitions().Append(title_left_col);
+    title_grid.ColumnDefinitions().Append(title_filter_col);
     title_grid.ColumnDefinitions().Append(title_right_col);
 
     auto title_panel{StackPanel{}};
@@ -277,6 +300,23 @@ void EnvironmentPage::BuildList(Grid const& parent) {
     title_panel.Children().Append(title_text);
     title_panel.Children().Append(count_text);
     Grid::SetColumn(title_panel, 0);
+
+    // Filter box
+    auto filter_box{TextBox{}};
+    filter_box.PlaceholderText(L"Filter...");
+    filter_box.Text(m_filterText);
+    filter_box.MaxWidth(300);
+    filter_box.Margin(ThicknessHelper::FromLengths(16, 0, 16, 0));
+    filter_box.VerticalAlignment(VerticalAlignment::Center);
+    Grid::SetColumn(filter_box, 1);
+
+    filter_box.TextChanged([this](winrt::Windows::Foundation::IInspectable const& sender,
+                                  [[maybe_unused]] TextChangedEventArgs const& e) {
+        m_filterText = sender.as<TextBox>().Text().c_str();
+        RebuildRows();
+    });
+
+    title_grid.Children().Append(filter_box);
 
     // Toolbar buttons
     auto toolbar{StackPanel{}};
@@ -303,7 +343,7 @@ void EnvironmentPage::BuildList(Grid const& parent) {
 
     toolbar.Children().Append(save_btn);
     toolbar.Children().Append(history_btn);
-    Grid::SetColumn(toolbar, 1);
+    Grid::SetColumn(toolbar, 2);
 
     title_grid.Children().Append(title_panel);
     title_grid.Children().Append(toolbar);
@@ -375,8 +415,20 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         args.Handled(true);
     });
 
-    auto rows_panel{StackPanel{}};
-    rows_panel.Spacing(0);
+    m_rowsPanel = StackPanel{};
+    m_rowsPanel.Spacing(0);
+    RebuildRows();
+
+    m_scrollViewer.Content(m_rowsPanel);
+    Grid::SetRow(m_scrollViewer, 2);
+    parent.Children().Append(m_scrollViewer);
+}
+
+void EnvironmentPage::RebuildRows() {
+    m_rowsPanel.Children().Clear();
+    m_selectedRowBorder = nullptr;
+
+    auto refs{BuildVariableRefs(m_userVariables, m_machineVariables)};
 
     std::size_t visual_row{0};
 
@@ -384,6 +436,11 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         auto& scoped_vars{ref.scope == Environ::core::Scope::User
             ? m_userVariables : m_machineVariables};
         auto& variable{scoped_vars[ref.index]};
+
+        if (!MatchesFilter(variable, m_filterText)) continue;
+
+        const bool name_matches{m_filterText.empty() ||
+            ContainsCaseInsensitive(variable.name, m_filterText)};
         const bool is_selected{m_selectedVariable.has_value()
             && m_selectedVariable->scope == ref.scope
             && m_selectedVariable->name == variable.name};
@@ -553,12 +610,14 @@ void EnvironmentPage::BuildList(Grid const& parent) {
         });
 
         row_border.Child(row_grid);
-        rows_panel.Children().Append(row_border);
+        m_rowsPanel.Children().Append(row_border);
         ++visual_row;
 
         // --- Continuation rows for path-list segments 1..N ---
         if (variable.kind == Environ::core::EnvVariableKind::PathList) {
             for (std::size_t seg_i{1}; seg_i < variable.segments.size(); ++seg_i) {
+                if (!SegmentMatchesFilter(variable.segments[seg_i], m_filterText, name_matches))
+                    continue;
                 auto cont_border{Border{}};
                 cont_border.Padding(ThicknessHelper::FromLengths(8, 0, 8, 0));
                 cont_border.MinHeight(kRowMinHeight);
@@ -627,15 +686,12 @@ void EnvironmentPage::BuildList(Grid const& parent) {
                 });
 
                 cont_border.Child(cont_grid);
-                rows_panel.Children().Append(cont_border);
+                m_rowsPanel.Children().Append(cont_border);
                 ++visual_row;
             }
         }
     }
 
-    m_scrollViewer.Content(rows_panel);
-    Grid::SetRow(m_scrollViewer, 2);
-    parent.Children().Append(m_scrollViewer);
 }
 
 void EnvironmentPage::OnHistory() {
