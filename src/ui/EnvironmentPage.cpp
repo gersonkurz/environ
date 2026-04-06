@@ -731,9 +731,11 @@ void EnvironmentPage::RebuildRows() {
                                          winrt::Windows::Foundation::IInspectable const& sender,
                                          winrt::Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const& args) {
                     if (args.Key() != winrt::Windows::System::VirtualKey::Enter) return;
-                    auto text{std::wstring{sender.as<TextBox>().Text()}};
+                    auto box{sender.as<TextBox>()};
+                    auto text{std::wstring{box.Text()}};
                     if (text.empty()) return;
 
+                    box.Text(L""); // Prevent LostFocus from committing again
                     auto& vars{scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
                     if (idx < vars.size()) {
                         vars[idx].segments.push_back(text);
@@ -833,6 +835,8 @@ void EnvironmentPage::RebuildRows() {
             if (name.empty()) return;
 
             auto value{std::wstring{add_value_cell.Text()}};
+            add_name_cell.Text(L""); // Prevent LostFocus from committing again
+            add_value_cell.Text(L"");
             m_userVariables.push_back(Environ::core::EnvVariable{
                 .name{name},
                 .value{value},
