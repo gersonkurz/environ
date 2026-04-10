@@ -19,6 +19,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         std::vector<Environ::core::EnvVariable> m_userVariables;
         std::vector<Environ::core::EnvVariable> m_machineVariables;
         std::wstring m_filterText;
+        bool m_isElevated{false};
     };
 }
 

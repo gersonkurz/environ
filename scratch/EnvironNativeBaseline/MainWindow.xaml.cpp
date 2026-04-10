@@ -17,6 +17,9 @@ namespace winrt::EnvironNativeBaseline::implementation
 {
     namespace
     {
+        constexpr double kNameColumnWidth{220.0};
+        constexpr double kScopeColumnWidth{90.0};
+
         struct VariableRef
         {
             Environ::core::Scope scope;
@@ -54,6 +57,34 @@ namespace winrt::EnvironNativeBaseline::implementation
         bool NameMatchesFilter(Environ::core::EnvVariable const& variable, std::wstring const& filter)
         {
             return !filter.empty() && ContainsCaseInsensitive(variable.name, filter);
+        }
+
+        std::vector<std::wstring> VisibleSegments(
+            Environ::core::EnvVariable const& variable,
+            std::wstring const& filter)
+        {
+            std::vector<std::wstring> segments;
+
+            auto const show_all_segments{
+                filter.empty() || NameMatchesFilter(variable, filter)};
+
+            for (auto const& segment : variable.segments)
+            {
+                if (!show_all_segments &&
+                    !ContainsCaseInsensitive(segment, filter))
+                {
+                    continue;
+                }
+
+                segments.push_back(segment);
+            }
+
+            if (segments.empty())
+            {
+                segments.push_back(L"(empty)");
+            }
+
+            return segments;
         }
 
         VariableRef MakeVariableRef(Environ::core::Scope const scope, std::size_t const index)
@@ -130,114 +161,107 @@ namespace winrt::EnvironNativeBaseline::implementation
                 .as<Brush>();
         }
 
-        Border MakeScopeBadge(Environ::core::Scope const scope)
+        TextBlock MakeScopeText(Environ::core::Scope const scope)
         {
-            auto badge{Border{}};
-            badge.Padding(ThicknessHelper::FromLengths(6, 2, 6, 2));
-            badge.CornerRadius(CornerRadiusHelper::FromUniformRadius(4));
-            badge.VerticalAlignment(VerticalAlignment::Top);
-
             auto text{TextBlock{}};
             text.Text(scope == Environ::core::Scope::User ? L"User" : L"Machine");
             text.FontSize(11);
-
-            if (scope == Environ::core::Scope::User)
-            {
-                badge.Background(ThemeBrush(L"AccentFillColorSecondaryBrush"));
-                text.Foreground(ThemeBrush(L"AccentTextFillColorPrimaryBrush"));
-            }
-            else
-            {
-                badge.Background(ThemeBrush(L"ControlFillColorSecondaryBrush"));
-                text.Foreground(ThemeBrush(L"TextFillColorSecondaryBrush"));
-            }
-
-            badge.Child(text);
-            return badge;
+            text.Opacity(0.78);
+            text.VerticalAlignment(VerticalAlignment::Top);
+            return text;
         }
 
-        UIElement MakeValueElement(
-            Environ::core::EnvVariable const& variable,
-            std::wstring const& filter)
+        Grid MakeRowGrid()
         {
-            if (variable.kind == Environ::core::EnvVariableKind::PathList)
-            {
-                auto values{StackPanel{}};
-                values.Spacing(2);
+            auto row_grid{Grid{}};
+            row_grid.ColumnSpacing(12);
+            row_grid.VerticalAlignment(VerticalAlignment::Top);
 
-                auto const show_all_segments{
-                    filter.empty() ||
-                    NameMatchesFilter(variable, filter)};
-                bool any_segment_visible{false};
+            auto name_column{ColumnDefinition{}};
+            name_column.Width(GridLengthHelper::FromPixels(kNameColumnWidth));
+            auto scope_column{ColumnDefinition{}};
+            scope_column.Width(GridLengthHelper::FromPixels(kScopeColumnWidth));
+            auto value_column{ColumnDefinition{}};
+            value_column.Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+            row_grid.ColumnDefinitions().Append(name_column);
+            row_grid.ColumnDefinitions().Append(scope_column);
+            row_grid.ColumnDefinitions().Append(value_column);
 
-                for (auto const& segment : variable.segments)
-                {
-                    if (!show_all_segments &&
-                        !ContainsCaseInsensitive(segment, filter))
-                    {
-                        continue;
-                    }
+            return row_grid;
+        }
 
-                    auto segment_text{MakeText(segment)};
-                    segment_text.Margin(ThicknessHelper::FromLengths(0, 0, 0, 0));
-                    values.Children().Append(segment_text);
-                    any_segment_visible = true;
-                }
-
-                if (variable.segments.empty() || !any_segment_visible)
-                {
-                    auto empty_text{MakeText(L"(empty)", false, 0.55)};
-                    values.Children().Append(empty_text);
-                }
-
-                return values;
-            }
-
-            return MakeText(variable.value.empty() ? L"(empty)" : variable.value,
-                            false,
-                            variable.value.empty() ? 0.55 : 1.0);
+        Border MakeRowSeparator()
+        {
+            auto separator{Border{}};
+            separator.Height(1);
+            separator.Margin(ThicknessHelper::FromLengths(0, 6, 0, 0));
+            separator.Background(ThemeBrush(L"ControlStrokeColorSecondaryBrush"));
+            return separator;
         }
 
         Border MakeVariableRow(
             VariableRef const& item,
             std::vector<Environ::core::EnvVariable> const& user_variables,
             std::vector<Environ::core::EnvVariable> const& machine_variables,
-            std::wstring const& filter)
+            std::wstring const& filter,
+            bool const is_elevated)
         {
             auto const& variable{ResolveVariable(item, user_variables, machine_variables)};
 
-            auto row_grid{Grid{}};
-            row_grid.ColumnSpacing(12);
+            auto container{StackPanel{}};
+            container.Spacing(0);
 
-            auto scope_column{ColumnDefinition{}};
-            scope_column.Width(GridLengthHelper::Auto());
-            auto value_column{ColumnDefinition{}};
-            value_column.Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
-            row_grid.ColumnDefinitions().Append(scope_column);
-            row_grid.ColumnDefinitions().Append(value_column);
+            auto append_row = [&](std::wstring const& value_text, bool const first_row, bool const empty_value)
+            {
+                auto row_grid{MakeRowGrid()};
 
-            auto left_panel{StackPanel{}};
-            left_panel.Spacing(6);
-            left_panel.Children().Append(MakeScopeBadge(item.scope));
+                if (first_row)
+                {
+                    auto name_text{MakeText(variable.name, true)};
+                    name_text.TextTrimming(TextTrimming::CharacterEllipsis);
+                    name_text.VerticalAlignment(VerticalAlignment::Top);
+                    Grid::SetColumn(name_text, 0);
+                    row_grid.Children().Append(name_text);
 
-            auto name_text{MakeText(variable.name, true)};
-            left_panel.Children().Append(name_text);
-            Grid::SetColumn(left_panel, 0);
+                    auto scope_text{MakeScopeText(item.scope)};
+                    Grid::SetColumn(scope_text, 1);
+                    row_grid.Children().Append(scope_text);
+                }
 
-            auto value_panel{StackPanel{}};
-            value_panel.Spacing(6);
-            value_panel.Children().Append(MakeValueElement(variable, filter));
-            Grid::SetColumn(value_panel, 1);
+                auto value_text_block{MakeText(value_text, false, empty_value ? 0.55 : 1.0)};
+                value_text_block.VerticalAlignment(VerticalAlignment::Top);
+                Grid::SetColumn(value_text_block, 2);
+                row_grid.Children().Append(value_text_block);
 
-            row_grid.Children().Append(left_panel);
-            row_grid.Children().Append(value_panel);
+                auto content_border{Border{}};
+                content_border.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
+                if (!is_elevated && item.scope == Environ::core::Scope::Machine)
+                {
+                    content_border.Background(ThemeBrush(L"ControlFillColorSecondaryBrush"));
+                }
+                content_border.Child(row_grid);
 
-            auto border{Border{}};
-            border.Padding(ThicknessHelper::FromLengths(12, 10, 12, 10));
-            border.Margin(ThicknessHelper::FromLengths(0, 0, 0, 8));
-            border.CornerRadius(CornerRadiusHelper::FromUniformRadius(6));
-            border.Child(row_grid);
-            return border;
+                container.Children().Append(content_border);
+                container.Children().Append(MakeRowSeparator());
+            };
+
+            if (variable.kind == Environ::core::EnvVariableKind::PathList)
+            {
+                auto const segments{VisibleSegments(variable, filter)};
+                for (std::size_t i{0}; i < segments.size(); ++i)
+                {
+                    append_row(segments[i], i == 0, segments[i] == L"(empty)");
+                }
+            }
+            else
+            {
+                auto const scalar_value{variable.value.empty() ? L"(empty)" : variable.value};
+                append_row(scalar_value, true, variable.value.empty());
+            }
+
+            auto row_border{Border{}};
+            row_border.Child(container);
+            return row_border;
         }
     }
 
@@ -251,6 +275,7 @@ namespace winrt::EnvironNativeBaseline::implementation
     {
         m_userVariables = Environ::core::read_variables(Environ::core::Scope::User);
         m_machineVariables = Environ::core::read_variables(Environ::core::Scope::Machine);
+        m_isElevated = Environ::core::is_elevated();
         RebuildRows();
     }
 
@@ -260,6 +285,7 @@ namespace winrt::EnvironNativeBaseline::implementation
 
         auto const list{ItemsList()};
         list.Items().Clear();
+        list.Padding(ThicknessHelper::FromLengths(0, 4, 0, 0));
 
         std::size_t visible_count{0};
         for (auto const& item : all_items)
@@ -270,7 +296,12 @@ namespace winrt::EnvironNativeBaseline::implementation
                 continue;
             }
 
-            list.Items().Append(MakeVariableRow(item, m_userVariables, m_machineVariables, m_filterText));
+            list.Items().Append(MakeVariableRow(
+                item,
+                m_userVariables,
+                m_machineVariables,
+                m_filterText,
+                m_isElevated));
             ++visible_count;
         }
 
