@@ -11,6 +11,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -23,8 +24,14 @@
                        Text="Loading environment variables..." />
         </StackPanel>
 
+        <TextBox x:Name="FilterBox"
+                 Grid.Row="1"
+                 Margin="16,0,16,12"
+                 PlaceholderText="Filter variables..."
+                 TextChanged="OnFilterChanged" />
+
         <ListView x:Name="ItemsList"
-                  Grid.Row="1"
+                  Grid.Row="2"
                   Margin="16,0,16,16"
                   IsItemClickEnabled="False"
                   SelectionMode="None" />
