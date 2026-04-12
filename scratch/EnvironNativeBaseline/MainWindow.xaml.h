@@ -38,11 +38,20 @@ namespace winrt::EnvironNativeBaseline::implementation
         void RebuildRows();
         void SelectDisplayRow(DisplayRow const& display_row);
         void BringSelectedRowIntoView();
+        void MoveSelectionBy(int delta);
         void UpdateRowEditor(RowVisual const& row_visual, bool is_selected);
         [[nodiscard]] bool IsScalarRow(DisplayRow const& display_row) const;
+        [[nodiscard]] std::vector<std::wstring> CurrentPathSegments(DisplayRow const& display_row) const;
         [[nodiscard]] std::wstring CurrentScalarValue(DisplayRow const& display_row) const;
+        [[nodiscard]] std::wstring CurrentPathSegmentValue(DisplayRow const& display_row) const;
+        [[nodiscard]] bool MatchesFilter(DisplayRow const& display_row) const;
+        [[nodiscard]] std::vector<DisplayRow> BuildDisplayRows(
+            Environ::core::Scope scope,
+            std::size_t variable_index) const;
         void StoreScalarDraft(DisplayRow const& display_row, std::wstring const& value);
         void RestoreScalarDraft(DisplayRow const& display_row);
+        void StorePathSegmentDraft(DisplayRow const& display_row, std::wstring const& value);
+        void RestorePathDraft(DisplayRow const& display_row);
 
         std::vector<Environ::core::EnvVariable> m_userVariables;
         std::vector<Environ::core::EnvVariable> m_machineVariables;
@@ -51,6 +60,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         bool m_isElevated{false};
         std::optional<DisplayRow> m_selectedRow;
         std::unordered_map<std::uint64_t, std::wstring> m_scalarDrafts;
+        std::unordered_map<std::uint64_t, std::vector<std::wstring>> m_pathDrafts;
     };
 }
 

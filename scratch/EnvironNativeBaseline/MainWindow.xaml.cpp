@@ -42,78 +42,9 @@ namespace winrt::EnvironNativeBaseline::implementation
             return !it.empty();
         }
 
-        bool MatchesFilter(Environ::core::EnvVariable const& variable, std::wstring const& filter)
-        {
-            if (filter.empty())
-            {
-                return true;
-            }
-
-            if (ContainsCaseInsensitive(variable.name, filter) ||
-                ContainsCaseInsensitive(variable.value, filter))
-            {
-                return true;
-            }
-
-            return std::ranges::any_of(variable.segments, [&filter](std::wstring const& segment)
-            {
-                return ContainsCaseInsensitive(segment, filter);
-            });
-        }
-
         bool NameMatchesFilter(Environ::core::EnvVariable const& variable, std::wstring const& filter)
         {
             return !filter.empty() && ContainsCaseInsensitive(variable.name, filter);
-        }
-
-        std::vector<std::wstring> VisibleSegments(
-            Environ::core::EnvVariable const& variable,
-            std::wstring const& filter)
-        {
-            std::vector<std::wstring> segments;
-
-            auto const show_all_segments{
-                filter.empty() || NameMatchesFilter(variable, filter)};
-
-            for (auto const& segment : variable.segments)
-            {
-                if (!show_all_segments &&
-                    !ContainsCaseInsensitive(segment, filter))
-                {
-                    continue;
-                }
-
-                segments.push_back(segment);
-            }
-
-            if (segments.empty())
-            {
-                segments.push_back(L"(empty)");
-            }
-
-            return segments;
-        }
-
-        std::vector<VisibleRow> BuildDisplayRows(
-            VariableRef const& item,
-            Environ::core::EnvVariable const& variable,
-            std::wstring const& filter)
-        {
-            std::vector<VisibleRow> rows;
-
-            if (variable.kind == Environ::core::EnvVariableKind::PathList)
-            {
-                auto const segments{VisibleSegments(variable, filter)};
-                rows.reserve(segments.size());
-                for (std::size_t i{0}; i < segments.size(); ++i)
-                {
-                    rows.push_back(VisibleRow{item.scope, item.index, i});
-                }
-                return rows;
-            }
-
-            rows.push_back(VisibleRow{item.scope, item.index, 0});
-            return rows;
         }
 
         std::uint64_t MakeDraftKey(Environ::core::Scope const scope, std::size_t const index)
@@ -320,28 +251,14 @@ namespace winrt::EnvironNativeBaseline::implementation
             VisibleRow const& display_row,
             std::vector<Environ::core::EnvVariable> const& user_variables,
             std::vector<Environ::core::EnvVariable> const& machine_variables,
-            std::wstring const& filter,
             bool const is_elevated,
             bool const is_selected,
-            std::wstring const& scalar_value)
+            bool const is_first_row,
+            std::wstring const& value_text,
+            bool const empty_value)
         {
             auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
             auto const& variable{ResolveVariable(variable_ref, user_variables, machine_variables)};
-            auto const is_first_row{display_row.segmentIndex == 0};
-
-            std::wstring value_text;
-            bool empty_value{false};
-            if (variable.kind == Environ::core::EnvVariableKind::PathList)
-            {
-                auto const segments{VisibleSegments(variable, filter)};
-                value_text = segments[display_row.segmentIndex];
-                empty_value = value_text == L"(empty)";
-            }
-            else
-            {
-                value_text = scalar_value.empty() ? L"(empty)" : scalar_value;
-                empty_value = scalar_value.empty();
-            }
 
             auto row_grid{MakeRowGrid()};
 
@@ -409,16 +326,10 @@ namespace winrt::EnvironNativeBaseline::implementation
     void MainWindow::EnsureSelection()
     {
         auto const all_items{BuildVariableRefs(m_userVariables, m_machineVariables)};
-        std::vector<VisibleRow> visible_rows;
+        std::vector<DisplayRow> visible_rows;
         for (auto const& item : all_items)
         {
-            auto const& variable{ResolveVariable(item, m_userVariables, m_machineVariables)};
-            if (!MatchesFilter(variable, m_filterText))
-            {
-                continue;
-            }
-
-            auto rows{BuildDisplayRows(item, variable, m_filterText)};
+            auto rows{BuildDisplayRows(item.scope, item.index)};
             visible_rows.insert(visible_rows.end(), rows.begin(), rows.end());
         }
 
@@ -429,7 +340,7 @@ namespace winrt::EnvironNativeBaseline::implementation
                 return false;
             }
 
-            return std::ranges::any_of(visible_rows, [this](VisibleRow const& row)
+            return std::ranges::any_of(visible_rows, [this](DisplayRow const& row)
             {
                 return row.scope == m_selectedRow->scope &&
                        row.variableIndex == m_selectedRow->variableIndex &&
@@ -470,14 +381,15 @@ namespace winrt::EnvironNativeBaseline::implementation
         std::size_t visible_count{0};
         for (auto const& item : all_items)
         {
-            auto const& variable{ResolveVariable(item, m_userVariables, m_machineVariables)};
-            if (!MatchesFilter(variable, m_filterText))
+            auto rows{BuildDisplayRows(item.scope, item.index)};
+            if (rows.empty())
             {
                 continue;
             }
 
-            for (auto const& display_row : BuildDisplayRows(item, variable, m_filterText))
+            for (std::size_t row_index{0}; row_index < rows.size(); ++row_index)
             {
+                auto const& display_row{rows[row_index]};
                 auto const is_selected{
                     m_selectedRow.has_value() &&
                     m_selectedRow->scope == display_row.scope &&
@@ -485,17 +397,20 @@ namespace winrt::EnvironNativeBaseline::implementation
                     m_selectedRow->segmentIndex == display_row.segmentIndex};
 
                 auto row_visual{MakeDisplayRow(
-                    display_row,
-                    m_userVariables,
-                    m_machineVariables,
-                    m_filterText,
-                    m_isElevated,
-                    is_selected,
-                    CurrentScalarValue(DisplayRow{
+                    VisibleRow{
                         .scope = display_row.scope,
                         .variableIndex = display_row.variableIndex,
                         .segmentIndex = display_row.segmentIndex,
-                    }))};
+                    },
+                    m_userVariables,
+                    m_machineVariables,
+                    m_isElevated,
+                    is_selected,
+                    row_index == 0,
+                    IsScalarRow(display_row) ? CurrentScalarValue(display_row) : CurrentPathSegmentValue(display_row),
+                    IsScalarRow(display_row)
+                        ? CurrentScalarValue(display_row).empty()
+                        : CurrentPathSegmentValue(display_row).empty())};
                 auto const visible_index{static_cast<int>(m_rowVisuals.size())};
                 row_visual.rowBorder.PointerPressed([this, visible_index](IInspectable const& sender, Input::PointerRoutedEventArgs const& args)
                 {
@@ -607,6 +522,27 @@ namespace winrt::EnvironNativeBaseline::implementation
         it->rowBorder.StartBringIntoView();
     }
 
+    void MainWindow::MoveSelectionBy(int const delta)
+    {
+        auto const list{ItemsList()};
+        auto const current_index{list.SelectedIndex()};
+        if (current_index < 0 || m_rowVisuals.empty())
+        {
+            return;
+        }
+
+        auto const next_index{std::clamp(
+            current_index + delta,
+            0,
+            static_cast<int>(m_rowVisuals.size()) - 1)};
+        if (next_index == current_index)
+        {
+            return;
+        }
+
+        list.SelectedIndex(next_index);
+    }
+
     void MainWindow::OnFilterChanged(
         IInspectable const& sender,
         Controls::TextChangedEventArgs const&)
@@ -637,6 +573,19 @@ namespace winrt::EnvironNativeBaseline::implementation
         return variable.kind != Environ::core::EnvVariableKind::PathList;
     }
 
+    std::vector<std::wstring> MainWindow::CurrentPathSegments(DisplayRow const& display_row) const
+    {
+        auto const key{MakeDraftKey(display_row.scope, display_row.variableIndex)};
+        if (auto const it{m_pathDrafts.find(key)}; it != m_pathDrafts.end())
+        {
+            return it->second;
+        }
+
+        auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+        auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+        return variable.segments;
+    }
+
     std::wstring MainWindow::CurrentScalarValue(DisplayRow const& display_row) const
     {
         auto const key{MakeDraftKey(display_row.scope, display_row.variableIndex)};
@@ -648,6 +597,96 @@ namespace winrt::EnvironNativeBaseline::implementation
         auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
         auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
         return variable.value;
+    }
+
+    std::wstring MainWindow::CurrentPathSegmentValue(DisplayRow const& display_row) const
+    {
+        auto const segments{CurrentPathSegments(display_row)};
+        if (segments.empty())
+        {
+            return {};
+        }
+
+        if (display_row.segmentIndex >= segments.size())
+        {
+            return {};
+        }
+
+        return segments[display_row.segmentIndex];
+    }
+
+    bool MainWindow::MatchesFilter(DisplayRow const& display_row) const
+    {
+        auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+        auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+        if (m_filterText.empty())
+        {
+            return true;
+        }
+
+        if (NameMatchesFilter(variable, m_filterText))
+        {
+            return true;
+        }
+
+        if (IsScalarRow(display_row))
+        {
+            return ContainsCaseInsensitive(CurrentScalarValue(display_row), m_filterText);
+        }
+
+        return ContainsCaseInsensitive(CurrentPathSegmentValue(display_row), m_filterText);
+    }
+
+    std::vector<MainWindow::DisplayRow> MainWindow::BuildDisplayRows(
+        Environ::core::Scope const scope,
+        std::size_t const variable_index) const
+    {
+        std::vector<DisplayRow> rows;
+        auto const display_row{DisplayRow{
+            .scope = scope,
+            .variableIndex = variable_index,
+            .segmentIndex = 0,
+        }};
+        auto const variable_ref{VariableRef{scope, variable_index}};
+        auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+
+        if (variable.kind != Environ::core::EnvVariableKind::PathList)
+        {
+            if (MatchesFilter(display_row))
+            {
+                rows.push_back(display_row);
+            }
+            return rows;
+        }
+
+        auto const show_all_segments{m_filterText.empty() || NameMatchesFilter(variable, m_filterText)};
+        auto const segments{CurrentPathSegments(display_row)};
+        if (segments.empty())
+        {
+            if (m_filterText.empty())
+            {
+                rows.push_back(display_row);
+            }
+            return rows;
+        }
+
+        rows.reserve(segments.size());
+        for (std::size_t i{0}; i < segments.size(); ++i)
+        {
+            auto const segment_row{DisplayRow{
+                .scope = scope,
+                .variableIndex = variable_index,
+                .segmentIndex = i,
+            }};
+            if (!show_all_segments && !MatchesFilter(segment_row))
+            {
+                continue;
+            }
+
+            rows.push_back(segment_row);
+        }
+
+        return rows;
     }
 
     void MainWindow::StoreScalarDraft(DisplayRow const& display_row, std::wstring const& value)
@@ -670,14 +709,37 @@ namespace winrt::EnvironNativeBaseline::implementation
         m_scalarDrafts.erase(MakeDraftKey(display_row.scope, display_row.variableIndex));
     }
 
-    void MainWindow::UpdateRowEditor(RowVisual const& row_visual, bool const is_selected)
+    void MainWindow::StorePathSegmentDraft(DisplayRow const& display_row, std::wstring const& value)
     {
-        auto const display_row{row_visual.displayRow};
-        if (!IsScalarRow(display_row))
+        auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+        auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+        auto segments{CurrentPathSegments(display_row)};
+
+        if (display_row.segmentIndex >= segments.size())
         {
             return;
         }
 
+        segments[display_row.segmentIndex] = value;
+
+        auto const key{MakeDraftKey(display_row.scope, display_row.variableIndex)};
+        if (segments == variable.segments)
+        {
+            m_pathDrafts.erase(key);
+            return;
+        }
+
+        m_pathDrafts[key] = std::move(segments);
+    }
+
+    void MainWindow::RestorePathDraft(DisplayRow const& display_row)
+    {
+        m_pathDrafts.erase(MakeDraftKey(display_row.scope, display_row.variableIndex));
+    }
+
+    void MainWindow::UpdateRowEditor(RowVisual const& row_visual, bool const is_selected)
+    {
+        auto const display_row{row_visual.displayRow};
         auto const container{row_visual.rowBorder.Child().as<StackPanel>()};
         auto const content_border{container.Children().GetAt(0).as<Border>()};
 
@@ -697,7 +759,9 @@ namespace winrt::EnvironNativeBaseline::implementation
             return;
         }
 
-        auto const current_value{CurrentScalarValue(display_row)};
+        auto const is_scalar{IsScalarRow(display_row)};
+        auto const current_value{
+            is_scalar ? CurrentScalarValue(display_row) : CurrentPathSegmentValue(display_row)};
         if (is_selected)
         {
             content_border.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
@@ -714,23 +778,57 @@ namespace winrt::EnvironNativeBaseline::implementation
             editor.TextWrapping(TextWrapping::NoWrap);
             editor.HorizontalAlignment(HorizontalAlignment::Stretch);
             editor.VerticalAlignment(VerticalAlignment::Top);
-            editor.TextChanged([this, display_row](IInspectable const& sender, Controls::TextChangedEventArgs const&)
+            editor.TextChanged([this, display_row, is_scalar](IInspectable const& sender, Controls::TextChangedEventArgs const&)
             {
-                StoreScalarDraft(display_row, sender.as<TextBox>().Text().c_str());
+                auto const value{std::wstring{sender.as<TextBox>().Text().c_str()}};
+                if (is_scalar)
+                {
+                    StoreScalarDraft(display_row, value);
+                    return;
+                }
+
+                StorePathSegmentDraft(display_row, value);
             });
-            editor.KeyDown([this, display_row](IInspectable const& sender, Input::KeyRoutedEventArgs const& args)
+            editor.PreviewKeyDown([this, display_row](IInspectable const&, Input::KeyRoutedEventArgs const& args)
             {
+                if (args.Key() == winrt::Windows::System::VirtualKey::Up)
+                {
+                    MoveSelectionBy(-1);
+                    args.Handled(true);
+                    return;
+                }
+
+                if (args.Key() == winrt::Windows::System::VirtualKey::Down)
+                {
+                    MoveSelectionBy(1);
+                    args.Handled(true);
+                    return;
+                }
+            });
+            editor.KeyDown([this, display_row, is_scalar](IInspectable const& sender, Input::KeyRoutedEventArgs const& args)
+            {
+
                 if (args.Key() != winrt::Windows::System::VirtualKey::Escape)
                 {
                     return;
                 }
 
-                auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
-                auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
-                RestoreScalarDraft(display_row);
+                std::wstring restored_value;
+                if (is_scalar)
+                {
+                    auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+                    auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+                    RestoreScalarDraft(display_row);
+                    restored_value = variable.value;
+                }
+                else
+                {
+                    RestorePathDraft(display_row);
+                    restored_value = CurrentPathSegmentValue(display_row);
+                }
 
                 auto const editor{sender.as<TextBox>()};
-                editor.Text(winrt::hstring{variable.value});
+                editor.Text(winrt::hstring{restored_value});
                 editor.SelectAll();
                 args.Handled(true);
             });
