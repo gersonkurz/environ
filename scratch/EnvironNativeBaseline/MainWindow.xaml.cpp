@@ -158,6 +158,17 @@ namespace winrt::EnvironNativeBaseline::implementation
             return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
         }
 
+        Brush DirtyBackgroundBrush()
+        {
+            auto const requested_theme{Application::Current().RequestedTheme()};
+            auto const base_color{ThemeColor(L"ControlFillColorSecondaryBrush")};
+            auto const accent_color{ThemeColor(L"AccentFillColorDefaultBrush")};
+            auto const overlay_weight{
+                requested_theme == ApplicationTheme::Dark ? 0.14 : 0.08};
+
+            return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
+        }
+
         TextBlock MakeScopeText(Environ::core::Scope const scope)
         {
             auto text{TextBlock{}};
@@ -198,6 +209,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         void ApplySelectionVisual(
             Border const& row_border,
             bool const is_selected,
+            bool const is_dirty,
             bool const is_elevated,
             Environ::core::Scope const scope)
         {
@@ -207,6 +219,10 @@ namespace winrt::EnvironNativeBaseline::implementation
             if (is_selected)
             {
                 row_border.Background(SelectionBackgroundBrush());
+            }
+            else if (is_dirty)
+            {
+                row_border.Background(DirtyBackgroundBrush());
             }
             else if (!is_elevated && scope == Environ::core::Scope::Machine)
             {
@@ -295,7 +311,7 @@ namespace winrt::EnvironNativeBaseline::implementation
             row_border.Background(winrt::Microsoft::UI::Xaml::Media::SolidColorBrush{
                 winrt::Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)});
             row_border.Child(container);
-            ApplySelectionVisual(row_border, is_selected, is_elevated, display_row.scope);
+            ApplySelectionVisual(row_border, is_selected, false, is_elevated, display_row.scope);
             return MainWindow::RowVisual{
                 .displayRow = MainWindow::DisplayRow{
                     .scope = display_row.scope,
@@ -411,11 +427,17 @@ namespace winrt::EnvironNativeBaseline::implementation
                     IsScalarRow(display_row)
                         ? CurrentScalarValue(display_row).empty()
                         : CurrentPathSegmentValue(display_row).empty())};
+                ApplySelectionVisual(
+                    row_visual.rowBorder,
+                    is_selected,
+                    IsRowDirty(display_row),
+                    m_isElevated,
+                    display_row.scope);
                 auto const visible_index{static_cast<int>(m_rowVisuals.size())};
                 row_visual.rowBorder.PointerPressed([this, visible_index](IInspectable const& sender, Input::PointerRoutedEventArgs const& args)
                 {
                     auto const source{sender.as<UIElement>()};
-                    auto const point{args.GetCurrentPoint(source)};
+                    auto const point{args.GetCurrentPoint(source)};                    
                     if (!point.Properties().IsLeftButtonPressed())
                     {
                         return;
@@ -462,6 +484,7 @@ namespace winrt::EnvironNativeBaseline::implementation
             all_items.size(),
             m_userVariables.size(),
             m_machineVariables.size())});
+        RefreshDirtyState();
     }
 
     void MainWindow::SelectDisplayRow(DisplayRow const& display_row)
@@ -487,7 +510,12 @@ namespace winrt::EnvironNativeBaseline::implementation
                 return;
             }
 
-            ApplySelectionVisual(it->rowBorder, is_selected, m_isElevated, it->displayRow.scope);
+            ApplySelectionVisual(
+                it->rowBorder,
+                is_selected,
+                IsRowDirty(it->displayRow),
+                m_isElevated,
+                it->displayRow.scope);
             UpdateRowEditor(*it, is_selected);
         };
 
@@ -543,11 +571,60 @@ namespace winrt::EnvironNativeBaseline::implementation
         list.SelectedIndex(next_index);
     }
 
+    void MainWindow::RefreshDirtyState()
+    {
+        auto const has_dirty_state{HasDirtyState()};
+        DirtyStatePanel().Visibility(
+            has_dirty_state ? Visibility::Visible : Visibility::Collapsed);
+    }
+
+    void MainWindow::RefreshVariableVisuals(
+        Environ::core::Scope const scope,
+        std::size_t const variable_index)
+    {
+        for (auto const& row_visual : m_rowVisuals)
+        {
+            if (row_visual.displayRow.scope != scope ||
+                row_visual.displayRow.variableIndex != variable_index)
+            {
+                continue;
+            }
+
+            auto const is_selected{
+                m_selectedRow.has_value() &&
+                m_selectedRow->scope == row_visual.displayRow.scope &&
+                m_selectedRow->variableIndex == row_visual.displayRow.variableIndex &&
+                m_selectedRow->segmentIndex == row_visual.displayRow.segmentIndex};
+            ApplySelectionVisual(
+                row_visual.rowBorder,
+                is_selected,
+                IsRowDirty(row_visual.displayRow),
+                m_isElevated,
+                row_visual.displayRow.scope);
+        }
+
+        RefreshDirtyState();
+    }
+
     void MainWindow::OnFilterChanged(
         IInspectable const& sender,
         Controls::TextChangedEventArgs const&)
     {
         m_filterText = sender.as<TextBox>().Text().c_str();
+        RebuildRows();
+    }
+
+    void MainWindow::OnDiscardButtonClick(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        if (!HasDirtyState())
+        {
+            return;
+        }
+
+        m_scalarDrafts.clear();
+        m_pathDrafts.clear();
         RebuildRows();
     }
 
@@ -566,11 +643,29 @@ namespace winrt::EnvironNativeBaseline::implementation
         SelectDisplayRow(row.displayRow);
     }
 
+    bool MainWindow::HasDirtyState() const
+    {
+        return !m_scalarDrafts.empty() || !m_pathDrafts.empty();
+    }
+
     bool MainWindow::IsScalarRow(DisplayRow const& display_row) const
     {
         auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
         auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
         return variable.kind != Environ::core::EnvVariableKind::PathList;
+    }
+
+    bool MainWindow::IsVariableDirty(
+        Environ::core::Scope const scope,
+        std::size_t const variable_index) const
+    {
+        auto const key{MakeDraftKey(scope, variable_index)};
+        return m_scalarDrafts.contains(key) || m_pathDrafts.contains(key);
+    }
+
+    bool MainWindow::IsRowDirty(DisplayRow const& display_row) const
+    {
+        return IsVariableDirty(display_row.scope, display_row.variableIndex);
     }
 
     std::vector<std::wstring> MainWindow::CurrentPathSegments(DisplayRow const& display_row) const
@@ -784,10 +879,12 @@ namespace winrt::EnvironNativeBaseline::implementation
                 if (is_scalar)
                 {
                     StoreScalarDraft(display_row, value);
+                    RefreshVariableVisuals(display_row.scope, display_row.variableIndex);
                     return;
                 }
 
                 StorePathSegmentDraft(display_row, value);
+                RefreshVariableVisuals(display_row.scope, display_row.variableIndex);
             });
             editor.PreviewKeyDown([this, display_row](IInspectable const&, Input::KeyRoutedEventArgs const& args)
             {
@@ -830,6 +927,7 @@ namespace winrt::EnvironNativeBaseline::implementation
                 auto const editor{sender.as<TextBox>()};
                 editor.Text(winrt::hstring{restored_value});
                 editor.SelectAll();
+                RefreshVariableVisuals(display_row.scope, display_row.variableIndex);
                 args.Handled(true);
             });
             Grid::SetColumn(editor, 2);

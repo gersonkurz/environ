@@ -14,6 +14,9 @@ namespace winrt::EnvironNativeBaseline::implementation
         MainWindow();
         void OnFilterChanged(winrt::Windows::Foundation::IInspectable const& sender,
                              winrt::Microsoft::UI::Xaml::Controls::TextChangedEventArgs const& args);
+        void OnDiscardButtonClick(
+            winrt::Windows::Foundation::IInspectable const& sender,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnItemsListSelectionChanged(
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
@@ -39,8 +42,13 @@ namespace winrt::EnvironNativeBaseline::implementation
         void SelectDisplayRow(DisplayRow const& display_row);
         void BringSelectedRowIntoView();
         void MoveSelectionBy(int delta);
+        void RefreshDirtyState();
+        void RefreshVariableVisuals(Environ::core::Scope scope, std::size_t variable_index);
         void UpdateRowEditor(RowVisual const& row_visual, bool is_selected);
+        [[nodiscard]] bool HasDirtyState() const;
         [[nodiscard]] bool IsScalarRow(DisplayRow const& display_row) const;
+        [[nodiscard]] bool IsVariableDirty(Environ::core::Scope scope, std::size_t variable_index) const;
+        [[nodiscard]] bool IsRowDirty(DisplayRow const& display_row) const;
         [[nodiscard]] std::vector<std::wstring> CurrentPathSegments(DisplayRow const& display_row) const;
         [[nodiscard]] std::wstring CurrentScalarValue(DisplayRow const& display_row) const;
         [[nodiscard]] std::wstring CurrentPathSegmentValue(DisplayRow const& display_row) const;

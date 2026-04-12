@@ -36,6 +36,20 @@
             <TextBlock x:Name="SummaryText"
                        Opacity="0.7"
                        Text="Loading environment variables..." />
+            <StackPanel x:Name="DirtyStatePanel"
+                        Orientation="Horizontal"
+                        Spacing="12"
+                        Visibility="Collapsed">
+                <TextBlock x:Name="DirtyStateText"
+                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                           Opacity="0.9"
+                           Text="Unsaved changes"
+                           VerticalAlignment="Center" />
+                <Button x:Name="DiscardButton"
+                        Click="OnDiscardButtonClick"
+                        Content="Discard"
+                        Padding="10,4,10,4" />
+            </StackPanel>
         </StackPanel>
 
         <TextBox x:Name="FilterBox"
