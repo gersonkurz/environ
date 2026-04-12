@@ -38,16 +38,21 @@
                        Text="Loading environment variables..." />
             <StackPanel x:Name="DirtyStatePanel"
                         Orientation="Horizontal"
-                        Spacing="12"
-                        Visibility="Collapsed">
+                        Spacing="12">
                 <TextBlock x:Name="DirtyStateText"
                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                            Opacity="0.9"
-                           Text="Unsaved changes"
+                           Text=""
                            VerticalAlignment="Center" />
+                <Button x:Name="ApplyButton"
+                        Click="OnApplyButtonClick"
+                        Content="Apply"
+                        IsEnabled="False"
+                        Padding="10,4,10,4" />
                 <Button x:Name="DiscardButton"
                         Click="OnDiscardButtonClick"
                         Content="Discard"
+                        IsEnabled="False"
                         Padding="10,4,10,4" />
             </StackPanel>
         </StackPanel>

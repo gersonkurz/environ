@@ -169,6 +169,55 @@ namespace winrt::EnvironNativeBaseline::implementation
             return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
         }
 
+        std::wstring BuildApplyConfirmationText(
+            std::vector<Environ::core::EnvChange> const& user_changes,
+            std::vector<Environ::core::EnvChange> const& machine_changes,
+            bool const is_elevated)
+        {
+            std::wstring text;
+
+            auto append_scope = [&text](std::wstring_view title,
+                                        std::vector<Environ::core::EnvChange> const& changes)
+            {
+                if (changes.empty())
+                {
+                    return;
+                }
+
+                if (!text.empty())
+                {
+                    text += L"\n\n";
+                }
+
+                text += std::wstring{title};
+                text += L"\n";
+                text += Environ::core::summarize_changes(changes);
+
+                auto const preview_count{std::min<std::size_t>(changes.size(), 6)};
+                for (std::size_t i{0}; i < preview_count; ++i)
+                {
+                    text += L"\n";
+                    text += L"• ";
+                    text += changes[i].describe();
+                }
+
+                if (changes.size() > preview_count)
+                {
+                    text += std::format(L"\n• … {} more change(s)", changes.size() - preview_count);
+                }
+            };
+
+            append_scope(L"User variables", user_changes);
+            append_scope(L"Machine variables", machine_changes);
+
+            if (!machine_changes.empty() && !is_elevated)
+            {
+                text += L"\n\nMachine changes require administrator privileges and will fail in the current session.";
+            }
+
+            return text;
+        }
+
         TextBlock MakeScopeText(Environ::core::Scope const scope)
         {
             auto text{TextBlock{}};
@@ -574,8 +623,19 @@ namespace winrt::EnvironNativeBaseline::implementation
     void MainWindow::RefreshDirtyState()
     {
         auto const has_dirty_state{HasDirtyState()};
-        DirtyStatePanel().Visibility(
-            has_dirty_state ? Visibility::Visible : Visibility::Collapsed);
+        ApplyButton().IsEnabled(has_dirty_state);
+        DiscardButton().IsEnabled(has_dirty_state);
+
+        if (!m_statusText.empty())
+        {
+            DirtyStateText().Text(winrt::hstring{m_statusText});
+            DirtyStateText().Foreground(ThemeBrush(
+                m_statusIsError ? L"SystemFillColorCriticalBrush" : L"AccentTextFillColorPrimaryBrush"));
+            return;
+        }
+
+        DirtyStateText().Text(has_dirty_state ? winrt::hstring{L"Unsaved changes"} : winrt::hstring{});
+        DirtyStateText().Foreground(ThemeBrush(L"AccentTextFillColorPrimaryBrush"));
     }
 
     void MainWindow::RefreshVariableVisuals(
@@ -606,12 +666,99 @@ namespace winrt::EnvironNativeBaseline::implementation
         RefreshDirtyState();
     }
 
+    void MainWindow::SetStatus(std::wstring text, bool const is_error)
+    {
+        m_statusText = std::move(text);
+        m_statusIsError = is_error;
+        RefreshDirtyState();
+    }
+
     void MainWindow::OnFilterChanged(
         IInspectable const& sender,
         Controls::TextChangedEventArgs const&)
     {
         m_filterText = sender.as<TextBox>().Text().c_str();
         RebuildRows();
+    }
+
+    winrt::Windows::Foundation::IAsyncAction MainWindow::OnApplyButtonClick(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto const current_user{BuildCurrentVariables(Environ::core::Scope::User)};
+        auto const current_machine{BuildCurrentVariables(Environ::core::Scope::Machine)};
+        auto const user_changes{Environ::core::compute_diff(m_userVariables, current_user)};
+        auto const machine_changes{Environ::core::compute_diff(m_machineVariables, current_machine)};
+
+        if (user_changes.empty() && machine_changes.empty())
+        {
+            SetStatus({}, false);
+            co_return;
+        }
+
+        Controls::ContentDialog dialog;
+        dialog.XamlRoot(this->Content().as<FrameworkElement>().XamlRoot());
+        dialog.Title(box_value(L"Apply changes?"));
+        dialog.PrimaryButtonText(L"Apply");
+        dialog.CloseButtonText(L"Cancel");
+        dialog.DefaultButton(Controls::ContentDialogButton::Primary);
+
+        Controls::ScrollViewer scroll_viewer;
+        scroll_viewer.MaxHeight(420);
+
+        TextBlock content_text;
+        content_text.Text(winrt::hstring{BuildApplyConfirmationText(
+            user_changes,
+            machine_changes,
+            m_isElevated)});
+        content_text.TextWrapping(TextWrapping::Wrap);
+        scroll_viewer.Content(content_text);
+        dialog.Content(scroll_viewer);
+
+        auto const dialog_result{co_await dialog.ShowAsync()};
+        if (dialog_result != Controls::ContentDialogResult::Primary)
+        {
+            co_return;
+        }
+
+        auto const result{Environ::core::apply_document_changes(
+            m_userVariables,
+            current_user,
+            m_machineVariables,
+            current_machine,
+            m_isElevated)};
+
+        if (result.user.succeeded() && result.user.has_changes())
+        {
+            m_userVariables = current_user;
+            ClearScopeDrafts(Environ::core::Scope::User);
+        }
+
+        if (result.machine.succeeded() && result.machine.has_changes())
+        {
+            m_machineVariables = current_machine;
+            ClearScopeDrafts(Environ::core::Scope::Machine);
+        }
+
+        if (!result.machine.succeeded())
+        {
+            SetStatus(result.machine.error, true);
+        }
+        else if (!result.user.succeeded())
+        {
+            SetStatus(result.user.error, true);
+        }
+        else if (result.has_changes())
+        {
+            SetStatus(L"Changes applied.", false);
+        }
+        else
+        {
+            SetStatus({}, false);
+        }
+
+        RebuildRows();
+        co_return;
     }
 
     void MainWindow::OnDiscardButtonClick(
@@ -625,6 +772,7 @@ namespace winrt::EnvironNativeBaseline::implementation
 
         m_scalarDrafts.clear();
         m_pathDrafts.clear();
+        SetStatus({}, false);
         RebuildRows();
     }
 
@@ -710,6 +858,41 @@ namespace winrt::EnvironNativeBaseline::implementation
         return segments[display_row.segmentIndex];
     }
 
+    std::vector<Environ::core::EnvVariable> MainWindow::BuildCurrentVariables(
+        Environ::core::Scope const scope) const
+    {
+        auto variables{
+            scope == Environ::core::Scope::User ? m_userVariables : m_machineVariables};
+
+        for (std::size_t i{0}; i < variables.size(); ++i)
+        {
+            auto const key{MakeDraftKey(scope, i)};
+
+            if (auto const scalar_it{m_scalarDrafts.find(key)}; scalar_it != m_scalarDrafts.end())
+            {
+                variables[i].value = scalar_it->second;
+            }
+
+            if (auto const path_it{m_pathDrafts.find(key)}; path_it != m_pathDrafts.end())
+            {
+                variables[i].segments = path_it->second;
+                std::wstring joined_value;
+                for (std::size_t segment_index{0}; segment_index < path_it->second.size(); ++segment_index)
+                {
+                    if (segment_index > 0)
+                    {
+                        joined_value += L";";
+                    }
+
+                    joined_value += path_it->second[segment_index];
+                }
+                variables[i].value = std::move(joined_value);
+            }
+        }
+
+        return variables;
+    }
+
     bool MainWindow::MatchesFilter(DisplayRow const& display_row) const
     {
         auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
@@ -784,11 +967,44 @@ namespace winrt::EnvironNativeBaseline::implementation
         return rows;
     }
 
+    void MainWindow::ClearScopeDrafts(Environ::core::Scope const scope)
+    {
+        auto const scope_is_user{scope == Environ::core::Scope::User};
+
+        for (auto it{m_scalarDrafts.begin()}; it != m_scalarDrafts.end();)
+        {
+            auto const key_is_user{(it->first >> 63) == 0};
+            if (key_is_user == scope_is_user)
+            {
+                it = m_scalarDrafts.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        for (auto it{m_pathDrafts.begin()}; it != m_pathDrafts.end();)
+        {
+            auto const key_is_user{(it->first >> 63) == 0};
+            if (key_is_user == scope_is_user)
+            {
+                it = m_pathDrafts.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
     void MainWindow::StoreScalarDraft(DisplayRow const& display_row, std::wstring const& value)
     {
         auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
         auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
         auto const key{MakeDraftKey(display_row.scope, display_row.variableIndex)};
+        m_statusText.clear();
+        m_statusIsError = false;
 
         if (value == variable.value)
         {
@@ -809,6 +1025,8 @@ namespace winrt::EnvironNativeBaseline::implementation
         auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
         auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
         auto segments{CurrentPathSegments(display_row)};
+        m_statusText.clear();
+        m_statusIsError = false;
 
         if (display_row.segmentIndex >= segments.size())
         {

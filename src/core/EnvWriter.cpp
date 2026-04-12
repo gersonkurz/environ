@@ -67,6 +67,22 @@ std::wstring EnvChange::describe() const {
     return {};
 }
 
+bool ScopeApplyResult::has_changes() const {
+    return !changes.empty();
+}
+
+bool ScopeApplyResult::succeeded() const {
+    return error.empty();
+}
+
+bool ApplyResult::has_changes() const {
+    return user.has_changes() || machine.has_changes();
+}
+
+bool ApplyResult::succeeded() const {
+    return user.succeeded() && machine.succeeded();
+}
+
 std::wstring summarize_changes(std::vector<EnvChange> const& changes) {
     if (changes.empty()) return L"No changes";
 
@@ -222,6 +238,43 @@ std::wstring apply_changes(Scope scope, std::vector<EnvChange> const& changes) {
 
     RegCloseKey(hkey);
     return errors;
+}
+
+ApplyResult apply_document_changes(
+    std::vector<EnvVariable> const& original_user,
+    std::vector<EnvVariable> const& current_user,
+    std::vector<EnvVariable> const& original_machine,
+    std::vector<EnvVariable> const& current_machine,
+    bool const is_elevated) {
+
+    ApplyResult result;
+    result.user.changes = compute_diff(original_user, current_user);
+    result.machine.changes = compute_diff(original_machine, current_machine);
+
+    auto any_writes_attempted{false};
+
+    if (result.user.has_changes()) {
+        result.user.attempted = true;
+        result.user.error = apply_changes(Scope::User, result.user.changes);
+        any_writes_attempted = true;
+    }
+
+    if (result.machine.has_changes()) {
+        if (!is_elevated) {
+            result.machine.error = L"Administrator privileges are required to apply machine variable changes.";
+        } else {
+            result.machine.attempted = true;
+            result.machine.error = apply_changes(Scope::Machine, result.machine.changes);
+            any_writes_attempted = true;
+        }
+    }
+
+    if (any_writes_attempted) {
+        broadcast_environment_change();
+        result.broadcast_sent = true;
+    }
+
+    return result;
 }
 
 void broadcast_environment_change() {

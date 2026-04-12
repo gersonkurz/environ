@@ -3,6 +3,7 @@
 #include "MainWindow.g.h"
 
 #include "..\..\src\core\EnvStore.h"
+#include "..\..\src\core\EnvWriter.h"
 
 #include <optional>
 #include <unordered_map>
@@ -12,6 +13,9 @@ namespace winrt::EnvironNativeBaseline::implementation
     struct MainWindow : MainWindowT<MainWindow>
     {
         MainWindow();
+        winrt::Windows::Foundation::IAsyncAction OnApplyButtonClick(
+            winrt::Windows::Foundation::IInspectable const& sender,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnFilterChanged(winrt::Windows::Foundation::IInspectable const& sender,
                              winrt::Microsoft::UI::Xaml::Controls::TextChangedEventArgs const& args);
         void OnDiscardButtonClick(
@@ -44,6 +48,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         void MoveSelectionBy(int delta);
         void RefreshDirtyState();
         void RefreshVariableVisuals(Environ::core::Scope scope, std::size_t variable_index);
+        void SetStatus(std::wstring text, bool is_error);
         void UpdateRowEditor(RowVisual const& row_visual, bool is_selected);
         [[nodiscard]] bool HasDirtyState() const;
         [[nodiscard]] bool IsScalarRow(DisplayRow const& display_row) const;
@@ -52,10 +57,12 @@ namespace winrt::EnvironNativeBaseline::implementation
         [[nodiscard]] std::vector<std::wstring> CurrentPathSegments(DisplayRow const& display_row) const;
         [[nodiscard]] std::wstring CurrentScalarValue(DisplayRow const& display_row) const;
         [[nodiscard]] std::wstring CurrentPathSegmentValue(DisplayRow const& display_row) const;
+        [[nodiscard]] std::vector<Environ::core::EnvVariable> BuildCurrentVariables(Environ::core::Scope scope) const;
         [[nodiscard]] bool MatchesFilter(DisplayRow const& display_row) const;
         [[nodiscard]] std::vector<DisplayRow> BuildDisplayRows(
             Environ::core::Scope scope,
             std::size_t variable_index) const;
+        void ClearScopeDrafts(Environ::core::Scope scope);
         void StoreScalarDraft(DisplayRow const& display_row, std::wstring const& value);
         void RestoreScalarDraft(DisplayRow const& display_row);
         void StorePathSegmentDraft(DisplayRow const& display_row, std::wstring const& value);
@@ -69,6 +76,8 @@ namespace winrt::EnvironNativeBaseline::implementation
         std::optional<DisplayRow> m_selectedRow;
         std::unordered_map<std::uint64_t, std::wstring> m_scalarDrafts;
         std::unordered_map<std::uint64_t, std::vector<std::wstring>> m_pathDrafts;
+        std::wstring m_statusText;
+        bool m_statusIsError{false};
     };
 }
 
