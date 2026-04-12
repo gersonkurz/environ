@@ -9,7 +9,21 @@
     Title="Environ Native Baseline">
 
     <Grid>
+        <Grid.Resources>
+            <Style x:Key="FlatListViewItemStyle" TargetType="ListViewItem">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BackgroundSizing" Value="InnerBorderEdge" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+            </Style>
+        </Grid.Resources>
+
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -30,10 +44,38 @@
                  PlaceholderText="Filter variables..."
                  TextChanged="OnFilterChanged" />
 
+        <Grid Grid.Row="2"
+              Margin="16,0,16,0"
+              ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="90" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       Opacity="0.65"
+                       Text="Name" />
+            <TextBlock Grid.Column="1"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       Opacity="0.65"
+                       Text="Scope" />
+            <TextBlock Grid.Column="2"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       Opacity="0.65"
+                       Text="Value" />
+        </Grid>
+
         <ListView x:Name="ItemsList"
-                  Grid.Row="2"
+                  Grid.Row="3"
+                  ItemContainerStyle="{StaticResource FlatListViewItemStyle}"
                   Margin="16,0,16,16"
                   IsItemClickEnabled="False"
-                  SelectionMode="None" />
+                  SelectionChanged="OnItemsListSelectionChanged"
+                  SelectionMode="Single" />
     </Grid>
 </Window>

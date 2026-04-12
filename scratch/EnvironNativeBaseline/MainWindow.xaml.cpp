@@ -26,6 +26,13 @@ namespace winrt::EnvironNativeBaseline::implementation
             std::size_t index;
         };
 
+        struct VisibleRow
+        {
+            Environ::core::Scope scope;
+            std::size_t variableIndex;
+            std::size_t segmentIndex;
+        };
+
         bool ContainsCaseInsensitive(std::wstring const& haystack, std::wstring const& needle)
         {
             auto const it{std::ranges::search(haystack, needle, [](wchar_t left, wchar_t right)
@@ -85,6 +92,28 @@ namespace winrt::EnvironNativeBaseline::implementation
             }
 
             return segments;
+        }
+
+        std::vector<VisibleRow> BuildDisplayRows(
+            VariableRef const& item,
+            Environ::core::EnvVariable const& variable,
+            std::wstring const& filter)
+        {
+            std::vector<VisibleRow> rows;
+
+            if (variable.kind == Environ::core::EnvVariableKind::PathList)
+            {
+                auto const segments{VisibleSegments(variable, filter)};
+                rows.reserve(segments.size());
+                for (std::size_t i{0}; i < segments.size(); ++i)
+                {
+                    rows.push_back(VisibleRow{item.scope, item.index, i});
+                }
+                return rows;
+            }
+
+            rows.push_back(VisibleRow{item.scope, item.index, 0});
+            return rows;
         }
 
         VariableRef MakeVariableRef(Environ::core::Scope const scope, std::size_t const index)
@@ -161,6 +190,37 @@ namespace winrt::EnvironNativeBaseline::implementation
                 .as<Brush>();
         }
 
+        winrt::Windows::UI::Color ThemeColor(std::wstring const& key)
+        {
+            return ThemeBrush(key).as<SolidColorBrush>().Color();
+        }
+
+        winrt::Windows::UI::Color BlendColor(
+            winrt::Windows::UI::Color const& base_color,
+            winrt::Windows::UI::Color const& overlay_color,
+            double const overlay_weight)
+        {
+            auto const clamped_weight{std::clamp(overlay_weight, 0.0, 1.0)};
+            auto const base_weight{1.0 - clamped_weight};
+
+            return winrt::Windows::UI::ColorHelper::FromArgb(
+                255,
+                static_cast<std::uint8_t>(base_color.R * base_weight + overlay_color.R * clamped_weight),
+                static_cast<std::uint8_t>(base_color.G * base_weight + overlay_color.G * clamped_weight),
+                static_cast<std::uint8_t>(base_color.B * base_weight + overlay_color.B * clamped_weight));
+        }
+
+        Brush SelectionBackgroundBrush()
+        {
+            auto const requested_theme{Application::Current().RequestedTheme()};
+            auto const base_color{ThemeColor(L"ControlFillColorSecondaryBrush")};
+            auto const accent_color{ThemeColor(L"AccentFillColorDefaultBrush")};
+            auto const overlay_weight{
+                requested_theme == ApplicationTheme::Dark ? 0.22 : 0.12};
+
+            return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
+        }
+
         TextBlock MakeScopeText(Environ::core::Scope const scope)
         {
             auto text{TextBlock{}};
@@ -205,15 +265,21 @@ namespace winrt::EnvironNativeBaseline::implementation
             bool const is_elevated,
             Environ::core::Scope const scope)
         {
+            row_border.ClearValue(Border::BorderThicknessProperty());
+            row_border.ClearValue(Border::BorderBrushProperty());
+
             if (is_selected)
             {
-                row_border.BorderThickness(ThicknessHelper::FromLengths(2, 0, 0, 0));
-                row_border.BorderBrush(ThemeBrush(L"AccentFillColorDefaultBrush"));
+                row_border.Background(SelectionBackgroundBrush());
+            }
+            else if (!is_elevated && scope == Environ::core::Scope::Machine)
+            {
+                row_border.Background(ThemeBrush(L"ControlFillColorSecondaryBrush"));
             }
             else
             {
-                row_border.ClearValue(Border::BorderThicknessProperty());
-                row_border.ClearValue(Border::BorderBrushProperty());
+                row_border.Background(SolidColorBrush{
+                    winrt::Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)});
             }
 
             auto const container{row_border.Child().try_as<StackPanel>()};
@@ -232,11 +298,11 @@ namespace winrt::EnvironNativeBaseline::implementation
 
                 if (is_selected)
                 {
-                    content_border.Background(ThemeBrush(L"ControlFillColorTertiaryBrush"));
+                    content_border.ClearValue(Border::BackgroundProperty());
                 }
                 else if (!is_elevated && scope == Environ::core::Scope::Machine)
                 {
-                    content_border.Background(ThemeBrush(L"ControlFillColorSecondaryBrush"));
+                    content_border.ClearValue(Border::BackgroundProperty());
                 }
                 else
                 {
@@ -245,77 +311,68 @@ namespace winrt::EnvironNativeBaseline::implementation
             }
         }
 
-        Border MakeVariableRow(
-            VariableRef const& item,
+        Border MakeDisplayRow(
+            VisibleRow const& display_row,
             std::vector<Environ::core::EnvVariable> const& user_variables,
             std::vector<Environ::core::EnvVariable> const& machine_variables,
             std::wstring const& filter,
             bool const is_elevated,
             bool const is_selected)
         {
-            auto const& variable{ResolveVariable(item, user_variables, machine_variables)};
+            auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+            auto const& variable{ResolveVariable(variable_ref, user_variables, machine_variables)};
+            auto const is_first_row{display_row.segmentIndex == 0};
+
+            std::wstring value_text;
+            bool empty_value{false};
+            if (variable.kind == Environ::core::EnvVariableKind::PathList)
+            {
+                auto const segments{VisibleSegments(variable, filter)};
+                value_text = segments[display_row.segmentIndex];
+                empty_value = value_text == L"(empty)";
+            }
+            else
+            {
+                value_text = variable.value.empty() ? L"(empty)" : variable.value;
+                empty_value = variable.value.empty();
+            }
+
+            auto row_grid{MakeRowGrid()};
+
+            if (is_first_row)
+            {
+                auto name_text{MakeText(variable.name, true)};
+                name_text.TextTrimming(TextTrimming::CharacterEllipsis);
+                name_text.VerticalAlignment(VerticalAlignment::Top);
+                Grid::SetColumn(name_text, 0);
+                row_grid.Children().Append(name_text);
+
+                auto scope_text{MakeScopeText(display_row.scope)};
+                Grid::SetColumn(scope_text, 1);
+                row_grid.Children().Append(scope_text);
+            }
+
+            auto value_text_block{MakeText(value_text, false, empty_value ? 0.55 : 1.0)};
+            value_text_block.VerticalAlignment(VerticalAlignment::Top);
+            Grid::SetColumn(value_text_block, 2);
+            row_grid.Children().Append(value_text_block);
 
             auto container{StackPanel{}};
             container.Spacing(0);
 
-            auto append_row = [&](std::wstring const& value_text, bool const first_row, bool const empty_value)
-            {
-                auto row_grid{MakeRowGrid()};
+            auto content_border{Border{}};
+            content_border.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
+            content_border.Child(row_grid);
 
-                if (first_row)
-                {
-                    auto name_text{MakeText(variable.name, true)};
-                    name_text.TextTrimming(TextTrimming::CharacterEllipsis);
-                    name_text.VerticalAlignment(VerticalAlignment::Top);
-                    Grid::SetColumn(name_text, 0);
-                    row_grid.Children().Append(name_text);
-
-                    auto scope_text{MakeScopeText(item.scope)};
-                    Grid::SetColumn(scope_text, 1);
-                    row_grid.Children().Append(scope_text);
-                }
-
-                auto value_text_block{MakeText(value_text, false, empty_value ? 0.55 : 1.0)};
-                value_text_block.VerticalAlignment(VerticalAlignment::Top);
-                Grid::SetColumn(value_text_block, 2);
-                row_grid.Children().Append(value_text_block);
-
-                auto content_border{Border{}};
-                content_border.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
-                if (is_selected)
-                {
-                    content_border.Background(ThemeBrush(L"ControlFillColorTertiaryBrush"));
-                }
-                else if (!is_elevated && item.scope == Environ::core::Scope::Machine)
-                {
-                    content_border.Background(ThemeBrush(L"ControlFillColorSecondaryBrush"));
-                }
-                content_border.Child(row_grid);
-
-                container.Children().Append(content_border);
-                container.Children().Append(MakeRowSeparator());
-            };
-
-            if (variable.kind == Environ::core::EnvVariableKind::PathList)
-            {
-                auto const segments{VisibleSegments(variable, filter)};
-                for (std::size_t i{0}; i < segments.size(); ++i)
-                {
-                    append_row(segments[i], i == 0, segments[i] == L"(empty)");
-                }
-            }
-            else
-            {
-                auto const scalar_value{variable.value.empty() ? L"(empty)" : variable.value};
-                append_row(scalar_value, true, variable.value.empty());
-            }
+            container.Children().Append(content_border);
+            container.Children().Append(MakeRowSeparator());
 
             auto row_border{Border{}};
             row_border.Padding(ThicknessHelper::FromLengths(8, 0, 8, 0));
             row_border.Background(winrt::Microsoft::UI::Xaml::Media::SolidColorBrush{
                 winrt::Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)});
             row_border.Child(container);
-            ApplySelectionVisual(row_border, is_selected, is_elevated, item.scope);
+            ApplySelectionVisual(row_border, is_selected, is_elevated, display_row.scope);
             return row_border;
         }
     }
@@ -338,19 +395,31 @@ namespace winrt::EnvironNativeBaseline::implementation
     void MainWindow::EnsureSelection()
     {
         auto const all_items{BuildVariableRefs(m_userVariables, m_machineVariables)};
-
-        auto selection_is_visible = [this, &all_items]()
+        std::vector<VisibleRow> visible_rows;
+        for (auto const& item : all_items)
         {
-            if (!m_selectedVariable.has_value())
+            auto const& variable{ResolveVariable(item, m_userVariables, m_machineVariables)};
+            if (!MatchesFilter(variable, m_filterText))
+            {
+                continue;
+            }
+
+            auto rows{BuildDisplayRows(item, variable, m_filterText)};
+            visible_rows.insert(visible_rows.end(), rows.begin(), rows.end());
+        }
+
+        auto selection_is_visible = [this, &visible_rows]()
+        {
+            if (!m_selectedRow.has_value())
             {
                 return false;
             }
 
-            return std::ranges::any_of(all_items, [this](VariableRef const& item)
+            return std::ranges::any_of(visible_rows, [this](VisibleRow const& row)
             {
-                return item.scope == m_selectedVariable->scope &&
-                       item.index == m_selectedVariable->index &&
-                       MatchesFilter(ResolveVariable(item, m_userVariables, m_machineVariables), m_filterText);
+                return row.scope == m_selectedRow->scope &&
+                       row.variableIndex == m_selectedRow->variableIndex &&
+                       row.segmentIndex == m_selectedRow->segmentIndex;
             });
         };
 
@@ -359,18 +428,18 @@ namespace winrt::EnvironNativeBaseline::implementation
             return;
         }
 
-        for (auto const& item : all_items)
+        if (!visible_rows.empty())
         {
-            if (!MatchesFilter(ResolveVariable(item, m_userVariables, m_machineVariables), m_filterText))
-            {
-                continue;
-            }
-
-            m_selectedVariable = RowVisual{item.scope, item.index, nullptr};
+            auto const& first_row{visible_rows.front()};
+            m_selectedRow = DisplayRow{
+                .scope = first_row.scope,
+                .variableIndex = first_row.variableIndex,
+                .segmentIndex = first_row.segmentIndex,
+            };
             return;
         }
 
-        m_selectedVariable.reset();
+        m_selectedRow.reset();
     }
 
     void MainWindow::RebuildRows()
@@ -379,6 +448,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         EnsureSelection();
 
         auto const list{ItemsList()};
+        auto const previous_selected_index{list.SelectedIndex()};
         list.Items().Clear();
         list.Padding(ThicknessHelper::FromLengths(0, 4, 0, 0));
         m_rowVisuals.clear();
@@ -392,32 +462,70 @@ namespace winrt::EnvironNativeBaseline::implementation
                 continue;
             }
 
-            auto const is_selected{
-                m_selectedVariable.has_value() &&
-                m_selectedVariable->scope == item.scope &&
-                m_selectedVariable->index == item.index};
-
-            auto row{MakeVariableRow(
-                item,
-                m_userVariables,
-                m_machineVariables,
-                m_filterText,
-                m_isElevated,
-                is_selected)};
-            row.PointerPressed([this, item](IInspectable const& sender, Input::PointerRoutedEventArgs const& args)
+            for (auto const& display_row : BuildDisplayRows(item, variable, m_filterText))
             {
-                auto const source{sender.as<UIElement>()};
-                auto const point{args.GetCurrentPoint(source)};
-                if (!point.Properties().IsLeftButtonPressed())
-                {
-                    return;
-                }
+                auto const is_selected{
+                    m_selectedRow.has_value() &&
+                    m_selectedRow->scope == display_row.scope &&
+                    m_selectedRow->variableIndex == display_row.variableIndex &&
+                    m_selectedRow->segmentIndex == display_row.segmentIndex};
 
-                SelectVariable(item.scope, item.index);
-            });
-            m_rowVisuals.push_back(RowVisual{item.scope, item.index, row});
-            list.Items().Append(row);
+                auto row{MakeDisplayRow(
+                    display_row,
+                    m_userVariables,
+                    m_machineVariables,
+                    m_filterText,
+                    m_isElevated,
+                    is_selected)};
+                auto const visible_index{static_cast<int>(m_rowVisuals.size())};
+                row.PointerPressed([this, visible_index](IInspectable const& sender, Input::PointerRoutedEventArgs const& args)
+                {
+                    auto const source{sender.as<UIElement>()};
+                    auto const point{args.GetCurrentPoint(source)};
+                    if (!point.Properties().IsLeftButtonPressed())
+                    {
+                        return;
+                    }
+
+                    ItemsList().SelectedIndex(visible_index);
+                });
+                m_rowVisuals.push_back(RowVisual{
+                    .displayRow = MainWindow::DisplayRow{
+                        .scope = display_row.scope,
+                        .variableIndex = display_row.variableIndex,
+                        .segmentIndex = display_row.segmentIndex,
+                    },
+                    .rowBorder = row,
+                });
+                list.Items().Append(row);
+            }
             ++visible_count;
+        }
+
+        if (m_selectedRow.has_value())
+        {
+            auto const it{std::ranges::find_if(m_rowVisuals, [this](RowVisual const& row)
+            {
+                return row.displayRow.scope == m_selectedRow->scope &&
+                       row.displayRow.variableIndex == m_selectedRow->variableIndex &&
+                       row.displayRow.segmentIndex == m_selectedRow->segmentIndex;
+            })};
+            if (it != m_rowVisuals.end())
+            {
+                auto const selected_index{static_cast<int>(std::distance(m_rowVisuals.begin(), it))};
+                if (selected_index != previous_selected_index)
+                {
+                    list.SelectedIndex(selected_index);
+                }
+            }
+            else
+            {
+                list.SelectedIndex(-1);
+            }
+        }
+        else
+        {
+            list.SelectedIndex(-1);
         }
 
         SummaryText().Text(winrt::hstring{std::format(
@@ -428,36 +536,61 @@ namespace winrt::EnvironNativeBaseline::implementation
             m_machineVariables.size())});
     }
 
-    void MainWindow::SelectVariable(Environ::core::Scope const scope, std::size_t const index)
+    void MainWindow::SelectDisplayRow(DisplayRow const& display_row)
     {
-        if (m_selectedVariable.has_value() &&
-            m_selectedVariable->scope == scope &&
-            m_selectedVariable->index == index)
+        if (m_selectedRow.has_value() &&
+            m_selectedRow->scope == display_row.scope &&
+            m_selectedRow->variableIndex == display_row.variableIndex &&
+            m_selectedRow->segmentIndex == display_row.segmentIndex)
         {
             return;
         }
 
-        auto update_row = [this](RowVisual const& selected, bool const is_selected)
+        auto update_row = [this](DisplayRow const& selected, bool const is_selected)
         {
             auto const it{std::ranges::find_if(m_rowVisuals, [&selected](RowVisual const& row)
             {
-                return row.scope == selected.scope && row.index == selected.index;
+                return row.displayRow.scope == selected.scope &&
+                       row.displayRow.variableIndex == selected.variableIndex &&
+                       row.displayRow.segmentIndex == selected.segmentIndex;
             })};
             if (it == m_rowVisuals.end())
             {
                 return;
             }
 
-            ApplySelectionVisual(it->rowBorder, is_selected, m_isElevated, it->scope);
+            ApplySelectionVisual(it->rowBorder, is_selected, m_isElevated, it->displayRow.scope);
         };
 
-        if (m_selectedVariable.has_value())
+        if (m_selectedRow.has_value())
         {
-            update_row(*m_selectedVariable, false);
+            update_row(*m_selectedRow, false);
         }
 
-        m_selectedVariable = RowVisual{scope, index, nullptr};
-        update_row(*m_selectedVariable, true);
+        m_selectedRow = display_row;
+        update_row(*m_selectedRow, true);
+        BringSelectedRowIntoView();
+    }
+
+    void MainWindow::BringSelectedRowIntoView()
+    {
+        if (!m_selectedRow.has_value())
+        {
+            return;
+        }
+
+        auto const it{std::ranges::find_if(m_rowVisuals, [this](RowVisual const& row)
+        {
+            return row.displayRow.scope == m_selectedRow->scope &&
+                   row.displayRow.variableIndex == m_selectedRow->variableIndex &&
+                   row.displayRow.segmentIndex == m_selectedRow->segmentIndex;
+        })};
+        if (it == m_rowVisuals.end())
+        {
+            return;
+        }
+
+        it->rowBorder.StartBringIntoView();
     }
 
     void MainWindow::OnFilterChanged(
@@ -466,5 +599,20 @@ namespace winrt::EnvironNativeBaseline::implementation
     {
         m_filterText = sender.as<TextBox>().Text().c_str();
         RebuildRows();
+    }
+
+    void MainWindow::OnItemsListSelectionChanged(
+        IInspectable const& sender,
+        Controls::SelectionChangedEventArgs const&)
+    {
+        auto const list{sender.as<ListView>()};
+        auto const selected_index{list.SelectedIndex()};
+        if (selected_index < 0 || selected_index >= static_cast<int>(m_rowVisuals.size()))
+        {
+            return;
+        }
+
+        auto const& row{m_rowVisuals[static_cast<std::size_t>(selected_index)]};
+        SelectDisplayRow(row.displayRow);
     }
 }
