@@ -3,6 +3,7 @@
 #include "EnvStore.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 

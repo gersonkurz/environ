@@ -67,7 +67,7 @@
       <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
       <LanguageStandard Condition="'$(VisualStudioVersion)' &gt;= '18.0'">stdcpp20</LanguageStandard>
       <LanguageStandard Condition="'$(VisualStudioVersion)' &lt; '18.0'">stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\packages\Microsoft.Windows.ImplementationLibrary.1.0.240803.1\include;$(MSBuildProjectDirectory)\..\..\extern\pnq\include;$(MSBuildProjectDirectory)\..\..\extern\spdlog\include;$(MSBuildProjectDirectory)\..\..\extern\tomlplusplus\include;$(MSBuildProjectDirectory)\..\..\src\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\packages\Microsoft.Windows.ImplementationLibrary.1.0.240803.1\include;$(MSBuildProjectDirectory)\..\..\extern\pnq\include;$(MSBuildProjectDirectory)\..\..\extern\spdlog\include;$(MSBuildProjectDirectory)\..\..\extern\tomlplusplus\include;$(MSBuildProjectDirectory)\..\..\extern\sqlite3\src\sqlite3;$(MSBuildProjectDirectory)\..\..\src\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>%(AdditionalOptions) /bigobj /utf-8</AdditionalOptions>
     </ClCompile>
@@ -88,7 +88,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup>
     <Link>
-      <AdditionalDependencies>advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>advapi32.lib;ole32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -122,6 +122,12 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\..\src\core\EnvWriter.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\src\core\SnapshotStore.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\..\extern\sqlite3\src\sqlite3\sqlite3.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />

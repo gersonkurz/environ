@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "MainWindow.xaml.h"
 
+#include <pnq/unicode.h>
+
 #include <algorithm>
 #include <format>
 
@@ -167,6 +169,42 @@ namespace winrt::EnvironNativeBaseline::implementation
                 requested_theme == ApplicationTheme::Dark ? 0.14 : 0.08};
 
             return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
+        }
+
+        std::string BuildSnapshotLabel(
+            std::vector<Environ::core::EnvChange> const& user_changes,
+            std::vector<Environ::core::EnvChange> const& machine_changes)
+        {
+            auto const user_summary{Environ::core::summarize_changes(user_changes)};
+            auto const machine_summary{Environ::core::summarize_changes(machine_changes)};
+
+            if (!user_changes.empty() && !machine_changes.empty())
+            {
+                return pnq::unicode::to_utf8(
+                    std::format(L"User: {} | Machine: {}", user_summary, machine_summary));
+            }
+
+            if (!user_changes.empty())
+            {
+                return pnq::unicode::to_utf8(user_summary);
+            }
+
+            return pnq::unicode::to_utf8(machine_summary);
+        }
+
+        std::wstring SnapshotScopeSummary(int const scope_mask)
+        {
+            switch (scope_mask)
+            {
+            case 1:
+                return L"User";
+            case 2:
+                return L"Machine";
+            case 3:
+                return L"User + Machine";
+            default:
+                return L"Unknown";
+            }
         }
 
         std::wstring BuildApplyConfirmationText(
@@ -376,7 +414,10 @@ namespace winrt::EnvironNativeBaseline::implementation
     MainWindow::MainWindow()
     {
         InitializeComponent();
+        m_snapshotStoreAvailable = m_snapshotStore.open();
+        HistoryNavButton().IsEnabled(m_snapshotStoreAvailable);
         LoadVariables();
+        ShowPage(ActivePage::Environment);
     }
 
     void MainWindow::LoadVariables()
@@ -386,6 +427,113 @@ namespace winrt::EnvironNativeBaseline::implementation
         m_isElevated = Environ::core::is_elevated();
         EnsureSelection();
         RebuildRows();
+        RefreshHistoryPage();
+    }
+
+    void MainWindow::RefreshHistoryPage()
+    {
+        HistoryList().Items().Clear();
+        HistoryChangesPanel().Children().Clear();
+        RestoreSnapshotButton().IsEnabled(false);
+
+        if (!m_snapshotStoreAvailable)
+        {
+            m_historySnapshots.clear();
+            HistorySummaryText().Text(L"Snapshot history is unavailable in the current session.");
+            HistoryDetailTitle().Text(L"History unavailable");
+            HistoryDetailSummary().Text(L"Snapshot store could not be opened.");
+            return;
+        }
+
+        m_historySnapshots = m_snapshotStore.list_snapshots();
+        if (m_historySnapshots.empty())
+        {
+            HistorySummaryText().Text(L"No snapshots yet. A snapshot is created after a successful apply.");
+            HistoryDetailTitle().Text(L"No snapshots");
+            HistoryDetailSummary().Text(L"Apply a change to create the first snapshot.");
+            return;
+        }
+
+        HistorySummaryText().Text(winrt::hstring{std::format(
+            L"{} snapshot(s)",
+            m_historySnapshots.size())});
+
+        for (auto const& snapshot : m_historySnapshots)
+        {
+            StackPanel row_panel;
+            row_panel.Spacing(2);
+
+            TextBlock label_text;
+            label_text.Text(winrt::to_hstring(snapshot.label));
+            label_text.FontWeight(winrt::Microsoft::UI::Text::FontWeights::SemiBold());
+            label_text.TextWrapping(TextWrapping::WrapWholeWords);
+
+            TextBlock timestamp_text;
+            timestamp_text.Text(winrt::to_hstring(snapshot.timestamp));
+            timestamp_text.Opacity(0.65);
+
+            row_panel.Children().Append(label_text);
+            row_panel.Children().Append(timestamp_text);
+
+            Controls::ListViewItem item;
+            item.Content(row_panel);
+            HistoryList().Items().Append(item);
+        }
+
+        HistoryList().SelectedIndex(0);
+        UpdateHistoryDetails();
+    }
+
+    void MainWindow::UpdateHistoryDetails()
+    {
+        auto const selected_index{HistoryList().SelectedIndex()};
+        if (selected_index < 0 || selected_index >= static_cast<int>(m_historySnapshots.size()))
+        {
+            HistoryDetailTitle().Text(L"Select a snapshot");
+            HistoryDetailSummary().Text({});
+            HistoryChangesPanel().Children().Clear();
+            RestoreSnapshotButton().IsEnabled(false);
+            return;
+        }
+
+        auto const& snapshot{m_historySnapshots[static_cast<std::size_t>(selected_index)]};
+        HistoryDetailTitle().Text(winrt::to_hstring(snapshot.label));
+        HistoryDetailSummary().Text(winrt::hstring{std::format(
+            L"{}  |  {}",
+            pnq::unicode::to_utf16(snapshot.timestamp),
+            SnapshotScopeSummary(snapshot.scope_mask))});
+
+        HistoryChangesPanel().Children().Clear();
+        auto const changes{m_snapshotStore.describe_snapshot_changes(snapshot.id)};
+        for (auto const& change : changes)
+        {
+            TextBlock change_text;
+            change_text.Text(change);
+            change_text.TextWrapping(TextWrapping::WrapWholeWords);
+            HistoryChangesPanel().Children().Append(change_text);
+        }
+
+        RestoreSnapshotButton().IsEnabled(true);
+    }
+
+    void MainWindow::ShowPage(ActivePage const page)
+    {
+        m_activePage = page;
+        auto const show_environment{page == ActivePage::Environment};
+
+        EnvironmentPageRoot().Visibility(show_environment ? Visibility::Visible : Visibility::Collapsed);
+        HistoryPageRoot().Visibility(show_environment ? Visibility::Collapsed : Visibility::Visible);
+
+        EnvironmentNavButton().Style(nullptr);
+        HistoryNavButton().Style(nullptr);
+
+        EnvironmentNavButton().IsEnabled(!show_environment);
+        HistoryNavButton().IsEnabled(show_environment && m_snapshotStoreAvailable);
+
+        if (!show_environment)
+        {
+            RefreshHistoryPage();
+        }
     }
 
     void MainWindow::EnsureSelection()
@@ -750,7 +898,37 @@ namespace winrt::EnvironNativeBaseline::implementation
         }
         else if (result.has_changes())
         {
-            SetStatus(L"Changes applied.", false);
+            auto const any_scope_applied{
+                (result.user.succeeded() && result.user.has_changes()) ||
+                (result.machine.succeeded() && result.machine.has_changes())};
+            if (any_scope_applied)
+            {
+                if (m_snapshotStoreAvailable)
+                {
+                    auto fresh_user{Environ::core::read_variables(Environ::core::Scope::User)};
+                    auto fresh_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
+                    auto const snapshot_id{m_snapshotStore.create_snapshot(
+                        BuildSnapshotLabel(result.user.changes, result.machine.changes),
+                        fresh_user,
+                        fresh_machine)};
+                    if (snapshot_id < 0)
+                    {
+                        SetStatus(L"Changes applied, but snapshot creation failed.", true);
+                    }
+                    else
+                    {
+                        SetStatus(L"Changes applied.", false);
+                    }
+                }
+                else
+                {
+                    SetStatus(L"Changes applied. Snapshot history unavailable.", false);
+                }
+            }
+            else
+            {
+                SetStatus(L"Changes applied.", false);
+            }
         }
         else
         {
@@ -759,6 +937,140 @@ namespace winrt::EnvironNativeBaseline::implementation
 
         RebuildRows();
         co_return;
+    }
+
+    void MainWindow::OnEnvironmentNavButtonClick(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowPage(ActivePage::Environment);
+    }
+
+    void MainWindow::OnHistoryButtonClick(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowPage(ActivePage::History);
+    }
+
+    void MainWindow::OnHistoryListSelectionChanged(
+        IInspectable const&,
+        Controls::SelectionChangedEventArgs const&)
+    {
+        UpdateHistoryDetails();
+    }
+
+    winrt::Windows::Foundation::IAsyncAction MainWindow::OnRestoreSnapshotButtonClick(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        auto const selected_index{HistoryList().SelectedIndex()};
+        if (selected_index < 0 || selected_index >= static_cast<int>(m_historySnapshots.size()))
+        {
+            co_return;
+        }
+
+        auto const& snapshot{m_historySnapshots[static_cast<std::size_t>(selected_index)]};
+        co_await RestoreSnapshotAsync(snapshot.id, winrt::to_hstring(snapshot.label));
+        RefreshHistoryPage();
+    }
+
+    winrt::Windows::Foundation::IAsyncAction MainWindow::RestoreSnapshotAsync(
+        int64_t const snapshot_id,
+        winrt::hstring const& snapshot_label)
+    {
+        Controls::ContentDialog confirm_dialog;
+        confirm_dialog.XamlRoot(this->Content().as<FrameworkElement>().XamlRoot());
+        confirm_dialog.Title(box_value(L"Restore snapshot?"));
+        confirm_dialog.PrimaryButtonText(L"Restore");
+        confirm_dialog.CloseButtonText(L"Cancel");
+        confirm_dialog.DefaultButton(Controls::ContentDialogButton::Primary);
+
+        TextBlock confirm_text;
+        confirm_text.Text(std::format(
+            L"Restore environment to \"{}\"? Current values will be overwritten.",
+            std::wstring_view{snapshot_label}));
+        confirm_text.TextWrapping(TextWrapping::Wrap);
+        confirm_dialog.Content(confirm_text);
+
+        auto const confirm_result{co_await confirm_dialog.ShowAsync()};
+        if (confirm_result != Controls::ContentDialogResult::Primary)
+        {
+            co_return;
+        }
+
+        auto const snapshot_variables{m_snapshotStore.load_snapshot(snapshot_id)};
+        std::vector<Environ::core::EnvVariable> target_user;
+        std::vector<Environ::core::EnvVariable> target_machine;
+        target_user.reserve(snapshot_variables.size());
+        target_machine.reserve(snapshot_variables.size());
+
+        for (auto const& snapshot_variable : snapshot_variables)
+        {
+            Environ::core::EnvVariable variable{
+                .name{snapshot_variable.name},
+                .value{snapshot_variable.value},
+                .is_expandable{snapshot_variable.is_expandable},
+            };
+
+            if (snapshot_variable.scope == Environ::core::Scope::User)
+            {
+                target_user.push_back(std::move(variable));
+            }
+            else
+            {
+                target_machine.push_back(std::move(variable));
+            }
+        }
+
+        auto const fresh_user{Environ::core::read_variables(Environ::core::Scope::User)};
+        auto const fresh_machine{Environ::core::read_variables(Environ::core::Scope::Machine)};
+
+        if (!m_snapshotStore.matches_latest_snapshot(fresh_user, fresh_machine))
+        {
+            auto const safety_snapshot_id{
+                m_snapshotStore.create_snapshot("Auto (pre-restore)", fresh_user, fresh_machine)};
+            if (safety_snapshot_id < 0)
+            {
+                SetStatus(L"Restore cancelled because the safety snapshot could not be created.", true);
+                co_return;
+            }
+        }
+
+        auto const result{Environ::core::apply_document_changes(
+            fresh_user,
+            target_user,
+            fresh_machine,
+            target_machine,
+            m_isElevated)};
+
+        if (result.has_changes())
+        {
+            LoadVariables();
+            m_scalarDrafts.clear();
+            m_pathDrafts.clear();
+        }
+
+        if (!result.machine.succeeded())
+        {
+            SetStatus(result.machine.error, true);
+            co_return;
+        }
+
+        if (!result.user.succeeded())
+        {
+            SetStatus(result.user.error, true);
+            co_return;
+        }
+
+        if (result.has_changes())
+        {
+            SetStatus(std::format(L"Restored snapshot \"{}\".", std::wstring_view{snapshot_label}), false);
+        }
+        else
+        {
+            SetStatus(L"Snapshot already matches the current environment.", false);
+        }
     }
 
     void MainWindow::OnDiscardButtonClick(
