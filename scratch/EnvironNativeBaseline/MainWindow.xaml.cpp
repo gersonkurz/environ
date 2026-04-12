@@ -116,6 +116,12 @@ namespace winrt::EnvironNativeBaseline::implementation
             return rows;
         }
 
+        std::uint64_t MakeDraftKey(Environ::core::Scope const scope, std::size_t const index)
+        {
+            auto const scope_value{scope == Environ::core::Scope::User ? 0ULL : 1ULL};
+            return (scope_value << 63) | static_cast<std::uint64_t>(index);
+        }
+
         VariableRef MakeVariableRef(Environ::core::Scope const scope, std::size_t const index)
         {
             return VariableRef{scope, index};
@@ -225,7 +231,6 @@ namespace winrt::EnvironNativeBaseline::implementation
         {
             auto text{TextBlock{}};
             text.Text(scope == Environ::core::Scope::User ? L"User" : L"Machine");
-            text.FontSize(11);
             text.Opacity(0.78);
             text.VerticalAlignment(VerticalAlignment::Top);
             return text;
@@ -311,13 +316,14 @@ namespace winrt::EnvironNativeBaseline::implementation
             }
         }
 
-        Border MakeDisplayRow(
+        MainWindow::RowVisual MakeDisplayRow(
             VisibleRow const& display_row,
             std::vector<Environ::core::EnvVariable> const& user_variables,
             std::vector<Environ::core::EnvVariable> const& machine_variables,
             std::wstring const& filter,
             bool const is_elevated,
-            bool const is_selected)
+            bool const is_selected,
+            std::wstring const& scalar_value)
         {
             auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
             auto const& variable{ResolveVariable(variable_ref, user_variables, machine_variables)};
@@ -333,8 +339,8 @@ namespace winrt::EnvironNativeBaseline::implementation
             }
             else
             {
-                value_text = variable.value.empty() ? L"(empty)" : variable.value;
-                empty_value = variable.value.empty();
+                value_text = scalar_value.empty() ? L"(empty)" : scalar_value;
+                empty_value = scalar_value.empty();
             }
 
             auto row_grid{MakeRowGrid()};
@@ -373,7 +379,15 @@ namespace winrt::EnvironNativeBaseline::implementation
                 winrt::Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)});
             row_border.Child(container);
             ApplySelectionVisual(row_border, is_selected, is_elevated, display_row.scope);
-            return row_border;
+            return MainWindow::RowVisual{
+                .displayRow = MainWindow::DisplayRow{
+                    .scope = display_row.scope,
+                    .variableIndex = display_row.variableIndex,
+                    .segmentIndex = display_row.segmentIndex,
+                },
+                .rowBorder = row_border,
+                .rowGrid = row_grid,
+            };
         }
     }
 
@@ -470,15 +484,20 @@ namespace winrt::EnvironNativeBaseline::implementation
                     m_selectedRow->variableIndex == display_row.variableIndex &&
                     m_selectedRow->segmentIndex == display_row.segmentIndex};
 
-                auto row{MakeDisplayRow(
+                auto row_visual{MakeDisplayRow(
                     display_row,
                     m_userVariables,
                     m_machineVariables,
                     m_filterText,
                     m_isElevated,
-                    is_selected)};
+                    is_selected,
+                    CurrentScalarValue(DisplayRow{
+                        .scope = display_row.scope,
+                        .variableIndex = display_row.variableIndex,
+                        .segmentIndex = display_row.segmentIndex,
+                    }))};
                 auto const visible_index{static_cast<int>(m_rowVisuals.size())};
-                row.PointerPressed([this, visible_index](IInspectable const& sender, Input::PointerRoutedEventArgs const& args)
+                row_visual.rowBorder.PointerPressed([this, visible_index](IInspectable const& sender, Input::PointerRoutedEventArgs const& args)
                 {
                     auto const source{sender.as<UIElement>()};
                     auto const point{args.GetCurrentPoint(source)};
@@ -489,15 +508,9 @@ namespace winrt::EnvironNativeBaseline::implementation
 
                     ItemsList().SelectedIndex(visible_index);
                 });
-                m_rowVisuals.push_back(RowVisual{
-                    .displayRow = MainWindow::DisplayRow{
-                        .scope = display_row.scope,
-                        .variableIndex = display_row.variableIndex,
-                        .segmentIndex = display_row.segmentIndex,
-                    },
-                    .rowBorder = row,
-                });
-                list.Items().Append(row);
+                UpdateRowEditor(row_visual, is_selected);
+                m_rowVisuals.push_back(row_visual);
+                list.Items().Append(row_visual.rowBorder);
             }
             ++visible_count;
         }
@@ -560,6 +573,7 @@ namespace winrt::EnvironNativeBaseline::implementation
             }
 
             ApplySelectionVisual(it->rowBorder, is_selected, m_isElevated, it->displayRow.scope);
+            UpdateRowEditor(*it, is_selected);
         };
 
         if (m_selectedRow.has_value())
@@ -614,5 +628,124 @@ namespace winrt::EnvironNativeBaseline::implementation
 
         auto const& row{m_rowVisuals[static_cast<std::size_t>(selected_index)]};
         SelectDisplayRow(row.displayRow);
+    }
+
+    bool MainWindow::IsScalarRow(DisplayRow const& display_row) const
+    {
+        auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+        auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+        return variable.kind != Environ::core::EnvVariableKind::PathList;
+    }
+
+    std::wstring MainWindow::CurrentScalarValue(DisplayRow const& display_row) const
+    {
+        auto const key{MakeDraftKey(display_row.scope, display_row.variableIndex)};
+        if (auto const it{m_scalarDrafts.find(key)}; it != m_scalarDrafts.end())
+        {
+            return it->second;
+        }
+
+        auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+        auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+        return variable.value;
+    }
+
+    void MainWindow::StoreScalarDraft(DisplayRow const& display_row, std::wstring const& value)
+    {
+        auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+        auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+        auto const key{MakeDraftKey(display_row.scope, display_row.variableIndex)};
+
+        if (value == variable.value)
+        {
+            m_scalarDrafts.erase(key);
+            return;
+        }
+
+        m_scalarDrafts[key] = value;
+    }
+
+    void MainWindow::RestoreScalarDraft(DisplayRow const& display_row)
+    {
+        m_scalarDrafts.erase(MakeDraftKey(display_row.scope, display_row.variableIndex));
+    }
+
+    void MainWindow::UpdateRowEditor(RowVisual const& row_visual, bool const is_selected)
+    {
+        auto const display_row{row_visual.displayRow};
+        if (!IsScalarRow(display_row))
+        {
+            return;
+        }
+
+        auto const container{row_visual.rowBorder.Child().as<StackPanel>()};
+        auto const content_border{container.Children().GetAt(0).as<Border>()};
+
+        auto value_index{-1};
+        auto children{row_visual.rowGrid.Children()};
+        for (uint32_t i{0}; i < children.Size(); ++i)
+        {
+            if (Grid::GetColumn(children.GetAt(i).as<FrameworkElement>()) == 2)
+            {
+                value_index = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (value_index < 0)
+        {
+            return;
+        }
+
+        auto const current_value{CurrentScalarValue(display_row)};
+        if (is_selected)
+        {
+            content_border.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
+
+            auto editor{TextBox{}};
+            editor.AcceptsReturn(false);
+            editor.Background(SolidColorBrush{winrt::Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)});
+            editor.BorderThickness(ThicknessHelper::FromUniformLength(0));
+            editor.CornerRadius(winrt::Microsoft::UI::Xaml::CornerRadiusHelper::FromUniformRadius(0));
+            editor.Margin(ThicknessHelper::FromLengths(0, -6, 0, -6));
+            editor.MinHeight(0);
+            editor.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
+            editor.Text(winrt::hstring{current_value});
+            editor.TextWrapping(TextWrapping::NoWrap);
+            editor.HorizontalAlignment(HorizontalAlignment::Stretch);
+            editor.VerticalAlignment(VerticalAlignment::Top);
+            editor.TextChanged([this, display_row](IInspectable const& sender, Controls::TextChangedEventArgs const&)
+            {
+                StoreScalarDraft(display_row, sender.as<TextBox>().Text().c_str());
+            });
+            editor.KeyDown([this, display_row](IInspectable const& sender, Input::KeyRoutedEventArgs const& args)
+            {
+                if (args.Key() != winrt::Windows::System::VirtualKey::Escape)
+                {
+                    return;
+                }
+
+                auto const variable_ref{VariableRef{display_row.scope, display_row.variableIndex}};
+                auto const& variable{ResolveVariable(variable_ref, m_userVariables, m_machineVariables)};
+                RestoreScalarDraft(display_row);
+
+                auto const editor{sender.as<TextBox>()};
+                editor.Text(winrt::hstring{variable.value});
+                editor.SelectAll();
+                args.Handled(true);
+            });
+            Grid::SetColumn(editor, 2);
+            children.SetAt(value_index, editor);
+            editor.Focus(FocusState::Programmatic);
+            editor.SelectAll();
+            return;
+        }
+
+        content_border.Padding(ThicknessHelper::FromLengths(0, 6, 0, 6));
+
+        auto text_block{MakeText(current_value.empty() ? L"(empty)" : current_value, false, current_value.empty() ? 0.55 : 1.0)};
+        text_block.VerticalAlignment(VerticalAlignment::Top);
+        Grid::SetColumn(text_block, 2);
+        children.SetAt(value_index, text_block);
     }
 }

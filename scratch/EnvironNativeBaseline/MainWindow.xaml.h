@@ -5,6 +5,7 @@
 #include "..\..\src\core\EnvStore.h"
 
 #include <optional>
+#include <unordered_map>
 
 namespace winrt::EnvironNativeBaseline::implementation
 {
@@ -17,7 +18,6 @@ namespace winrt::EnvironNativeBaseline::implementation
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
 
-    private:
         struct DisplayRow
         {
             Environ::core::Scope scope;
@@ -29,13 +29,20 @@ namespace winrt::EnvironNativeBaseline::implementation
         {
             DisplayRow displayRow;
             winrt::Microsoft::UI::Xaml::Controls::Border rowBorder;
+            winrt::Microsoft::UI::Xaml::Controls::Grid rowGrid;
         };
 
+    private:
         void EnsureSelection();
         void LoadVariables();
         void RebuildRows();
         void SelectDisplayRow(DisplayRow const& display_row);
         void BringSelectedRowIntoView();
+        void UpdateRowEditor(RowVisual const& row_visual, bool is_selected);
+        [[nodiscard]] bool IsScalarRow(DisplayRow const& display_row) const;
+        [[nodiscard]] std::wstring CurrentScalarValue(DisplayRow const& display_row) const;
+        void StoreScalarDraft(DisplayRow const& display_row, std::wstring const& value);
+        void RestoreScalarDraft(DisplayRow const& display_row);
 
         std::vector<Environ::core::EnvVariable> m_userVariables;
         std::vector<Environ::core::EnvVariable> m_machineVariables;
@@ -43,6 +50,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         std::wstring m_filterText;
         bool m_isElevated{false};
         std::optional<DisplayRow> m_selectedRow;
+        std::unordered_map<std::uint64_t, std::wstring> m_scalarDrafts;
     };
 }
 
