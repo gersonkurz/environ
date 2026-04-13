@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <format>
 
+#include <microsoft.ui.xaml.window.h>
+
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
@@ -205,6 +207,58 @@ namespace winrt::EnvironNativeBaseline::implementation
             default:
                 return L"Unknown";
             }
+        }
+
+        RECT ClampWindowRectToMonitor(RECT rect)
+        {
+            auto const monitor{MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST)};
+            MONITORINFO monitor_info{};
+            monitor_info.cbSize = sizeof(monitor_info);
+            if (!GetMonitorInfoW(monitor, &monitor_info))
+            {
+                return rect;
+            }
+
+            auto const work_area{monitor_info.rcWork};
+            auto const width{rect.right - rect.left};
+            auto const height{rect.bottom - rect.top};
+
+            if (width <= 0 || height <= 0)
+            {
+                return rect;
+            }
+
+            if (rect.left < work_area.left)
+            {
+                rect.left = work_area.left;
+                rect.right = rect.left + width;
+            }
+            if (rect.top < work_area.top)
+            {
+                rect.top = work_area.top;
+                rect.bottom = rect.top + height;
+            }
+            if (rect.right > work_area.right)
+            {
+                rect.right = work_area.right;
+                rect.left = rect.right - width;
+            }
+            if (rect.bottom > work_area.bottom)
+            {
+                rect.bottom = work_area.bottom;
+                rect.top = rect.bottom - height;
+            }
+
+            if (rect.left < work_area.left)
+            {
+                rect.left = work_area.left;
+            }
+            if (rect.top < work_area.top)
+            {
+                rect.top = work_area.top;
+            }
+
+            return rect;
         }
 
         std::wstring BuildApplyConfirmationText(
@@ -414,10 +468,17 @@ namespace winrt::EnvironNativeBaseline::implementation
     MainWindow::MainWindow()
     {
         InitializeComponent();
+        m_settings.load();
         m_snapshotStoreAvailable = m_snapshotStore.open();
         HistoryNavButton().IsEnabled(m_snapshotStoreAvailable);
         LoadVariables();
         ShowPage(ActivePage::Environment);
+        RestoreWindowPlacement();
+
+        Closed([this](IInspectable const&, WindowEventArgs const&)
+        {
+            SaveWindowPlacement();
+        });
     }
 
     void MainWindow::LoadVariables()
@@ -534,6 +595,61 @@ namespace winrt::EnvironNativeBaseline::implementation
         {
             RefreshHistoryPage();
         }
+    }
+
+    void MainWindow::RestoreWindowPlacement()
+    {
+        auto const app_window{AppWindow()};
+
+        auto width{m_settings.window.width.get()};
+        auto height{m_settings.window.height.get()};
+        if (width <= 0 || height <= 0)
+        {
+            width = 1100;
+            height = 700;
+        }
+
+        auto x{m_settings.window.x.get()};
+        auto y{m_settings.window.y.get()};
+        RECT rect{
+            .left = x >= 0 ? x : 100,
+            .top = y >= 0 ? y : 100,
+            .right = (x >= 0 ? x : 100) + width,
+            .bottom = (y >= 0 ? y : 100) + height,
+        };
+        rect = ClampWindowRectToMonitor(rect);
+
+        app_window.Resize({rect.right - rect.left, rect.bottom - rect.top});
+        app_window.Move({rect.left, rect.top});
+
+        if (m_settings.window.maximized.get())
+        {
+            auto const presenter{
+                app_window.Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>()};
+            presenter.Maximize();
+        }
+    }
+
+    void MainWindow::SaveWindowPlacement()
+    {
+        auto const app_window{AppWindow()};
+        auto const presenter{
+            app_window.Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>()};
+        auto const maximized{
+            presenter.State() == winrt::Microsoft::UI::Windowing::OverlappedPresenterState::Maximized};
+        m_settings.window.maximized.set(maximized);
+
+        if (!maximized)
+        {
+            auto const position{app_window.Position()};
+            auto const size{app_window.Size()};
+            m_settings.window.x.set(position.X);
+            m_settings.window.y.set(position.Y);
+            m_settings.window.width.set(size.Width);
+            m_settings.window.height.set(size.Height);
+        }
+
+        m_settings.save();
     }
 
     void MainWindow::EnsureSelection()

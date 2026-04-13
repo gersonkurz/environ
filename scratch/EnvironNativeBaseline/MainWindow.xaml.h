@@ -3,6 +3,7 @@
 #include "MainWindow.g.h"
 
 #include "..\..\src\core\EnvStore.h"
+#include "..\..\src\core\AppSettings.h"
 #include "..\..\src\core\SnapshotStore.h"
 #include "..\..\src\core\EnvWriter.h"
 
@@ -61,6 +62,8 @@ namespace winrt::EnvironNativeBaseline::implementation
     private:
         void EnsureSelection();
         void LoadVariables();
+        void RestoreWindowPlacement();
+        void SaveWindowPlacement();
         void RebuildRows();
         void RefreshHistoryPage();
         void UpdateHistoryDetails();
@@ -106,6 +109,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         std::wstring m_statusText;
         bool m_statusIsError{false};
         bool m_snapshotStoreAvailable{false};
+        Environ::core::AppSettings m_settings;
         Environ::core::SnapshotStore m_snapshotStore;
     };
 }
