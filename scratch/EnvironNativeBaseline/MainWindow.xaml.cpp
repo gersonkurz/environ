@@ -151,28 +151,6 @@ namespace winrt::EnvironNativeBaseline::implementation
                 static_cast<std::uint8_t>(base_color.B * base_weight + overlay_color.B * clamped_weight));
         }
 
-        Brush SelectionBackgroundBrush()
-        {
-            auto const requested_theme{Application::Current().RequestedTheme()};
-            auto const base_color{ThemeColor(L"ControlFillColorSecondaryBrush")};
-            auto const accent_color{ThemeColor(L"AccentFillColorDefaultBrush")};
-            auto const overlay_weight{
-                requested_theme == ApplicationTheme::Dark ? 0.22 : 0.12};
-
-            return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
-        }
-
-        Brush DirtyBackgroundBrush()
-        {
-            auto const requested_theme{Application::Current().RequestedTheme()};
-            auto const base_color{ThemeColor(L"ControlFillColorSecondaryBrush")};
-            auto const accent_color{ThemeColor(L"AccentFillColorDefaultBrush")};
-            auto const overlay_weight{
-                requested_theme == ApplicationTheme::Dark ? 0.14 : 0.08};
-
-            return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
-        }
-
         std::string BuildSnapshotLabel(
             std::vector<Environ::core::EnvChange> const& user_changes,
             std::vector<Environ::core::EnvChange> const& machine_changes)
@@ -206,6 +184,45 @@ namespace winrt::EnvironNativeBaseline::implementation
                 return L"User + Machine";
             default:
                 return L"Unknown";
+            }
+        }
+
+        ElementTheme ThemeFromSetting(std::string const& value)
+        {
+            if (value == "Light")
+            {
+                return ElementTheme::Light;
+            }
+            if (value == "Dark")
+            {
+                return ElementTheme::Dark;
+            }
+            return ElementTheme::Default;
+        }
+
+        int ThemeSelectionIndex(std::string const& value)
+        {
+            if (value == "Light")
+            {
+                return 1;
+            }
+            if (value == "Dark")
+            {
+                return 2;
+            }
+            return 0;
+        }
+
+        std::string ThemeSettingValue(int const selected_index)
+        {
+            switch (selected_index)
+            {
+            case 1:
+                return "Light";
+            case 2:
+                return "Dark";
+            default:
+                return "System";
             }
         }
 
@@ -347,69 +364,10 @@ namespace winrt::EnvironNativeBaseline::implementation
             return separator;
         }
 
-        void ApplySelectionVisual(
-            Border const& row_border,
-            bool const is_selected,
-            bool const is_dirty,
-            bool const is_elevated,
-            Environ::core::Scope const scope)
-        {
-            row_border.ClearValue(Border::BorderThicknessProperty());
-            row_border.ClearValue(Border::BorderBrushProperty());
-
-            if (is_selected)
-            {
-                row_border.Background(SelectionBackgroundBrush());
-            }
-            else if (is_dirty)
-            {
-                row_border.Background(DirtyBackgroundBrush());
-            }
-            else if (!is_elevated && scope == Environ::core::Scope::Machine)
-            {
-                row_border.Background(ThemeBrush(L"ControlFillColorSecondaryBrush"));
-            }
-            else
-            {
-                row_border.Background(SolidColorBrush{
-                    winrt::Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)});
-            }
-
-            auto const container{row_border.Child().try_as<StackPanel>()};
-            if (!container)
-            {
-                return;
-            }
-
-            for (auto const& child : container.Children())
-            {
-                auto const content_border{child.try_as<Border>()};
-                if (!content_border || !content_border.Child())
-                {
-                    continue;
-                }
-
-                if (is_selected)
-                {
-                    content_border.ClearValue(Border::BackgroundProperty());
-                }
-                else if (!is_elevated && scope == Environ::core::Scope::Machine)
-                {
-                    content_border.ClearValue(Border::BackgroundProperty());
-                }
-                else
-                {
-                    content_border.ClearValue(Border::BackgroundProperty());
-                }
-            }
-        }
-
         MainWindow::RowVisual MakeDisplayRow(
             VisibleRow const& display_row,
             std::vector<Environ::core::EnvVariable> const& user_variables,
             std::vector<Environ::core::EnvVariable> const& machine_variables,
-            bool const is_elevated,
-            bool const is_selected,
             bool const is_first_row,
             std::wstring const& value_text,
             bool const empty_value)
@@ -452,7 +410,6 @@ namespace winrt::EnvironNativeBaseline::implementation
             row_border.Background(winrt::Microsoft::UI::Xaml::Media::SolidColorBrush{
                 winrt::Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)});
             row_border.Child(container);
-            ApplySelectionVisual(row_border, is_selected, false, is_elevated, display_row.scope);
             return MainWindow::RowVisual{
                 .displayRow = MainWindow::DisplayRow{
                     .scope = display_row.scope,
@@ -469,6 +426,8 @@ namespace winrt::EnvironNativeBaseline::implementation
     {
         InitializeComponent();
         m_settings.load();
+        ApplyThemeSetting();
+        InitializeSettingsPage();
         m_snapshotStoreAvailable = m_snapshotStore.open();
         HistoryNavButton().IsEnabled(m_snapshotStoreAvailable);
         LoadVariables();
@@ -489,6 +448,88 @@ namespace winrt::EnvironNativeBaseline::implementation
         EnsureSelection();
         RebuildRows();
         RefreshHistoryPage();
+    }
+
+    void MainWindow::ApplyThemeSetting()
+    {
+        RootLayout().RequestedTheme(ThemeFromSetting(m_settings.appearance.theme.get()));
+    }
+
+    void MainWindow::InitializeSettingsPage()
+    {
+        ThemeComboBox().SelectedIndex(ThemeSelectionIndex(m_settings.appearance.theme.get()));
+        SettingsSummaryText().Text(L"Appearance and window behavior.");
+    }
+
+    ElementTheme MainWindow::EffectiveTheme()
+    {
+        auto const theme{RootLayout().ActualTheme()};
+        return theme == ElementTheme::Default ? ElementTheme::Light : theme;
+    }
+
+    Brush MainWindow::SelectionBackgroundBrush()
+    {
+        auto const accent_color{ThemeColor(L"AccentFillColorDefaultBrush")};
+        auto const dark_theme{EffectiveTheme() == ElementTheme::Dark};
+        auto const base_color{
+            dark_theme
+                ? winrt::Windows::UI::ColorHelper::FromArgb(255, 34, 34, 34)
+                : ThemeColor(L"ControlFillColorSecondaryBrush")};
+        auto const overlay_weight{dark_theme ? 0.16 : 0.12};
+
+        return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
+    }
+
+    Brush MainWindow::DirtyBackgroundBrush()
+    {
+        auto const accent_color{ThemeColor(L"AccentFillColorDefaultBrush")};
+        auto const dark_theme{EffectiveTheme() == ElementTheme::Dark};
+        auto const base_color{
+            dark_theme
+                ? winrt::Windows::UI::ColorHelper::FromArgb(255, 30, 30, 30)
+                : ThemeColor(L"ControlFillColorSecondaryBrush")};
+        auto const overlay_weight{dark_theme ? 0.10 : 0.08};
+
+        return SolidColorBrush{BlendColor(base_color, accent_color, overlay_weight)};
+    }
+
+    Brush MainWindow::MachineBackgroundBrush()
+    {
+        if (EffectiveTheme() == ElementTheme::Dark)
+        {
+            return SolidColorBrush{winrt::Windows::UI::ColorHelper::FromArgb(255, 38, 38, 38)};
+        }
+
+        return ThemeBrush(L"ControlFillColorSecondaryBrush");
+    }
+
+    void MainWindow::ApplySelectionVisual(
+        Border const& row_border,
+        bool const is_selected,
+        bool const is_dirty,
+        bool const is_elevated,
+        Environ::core::Scope const scope)
+    {
+        row_border.ClearValue(Border::BorderThicknessProperty());
+        row_border.ClearValue(Border::BorderBrushProperty());
+
+        if (is_selected)
+        {
+            row_border.Background(SelectionBackgroundBrush());
+        }
+        else if (is_dirty)
+        {
+            row_border.Background(DirtyBackgroundBrush());
+        }
+        else if (!is_elevated && scope == Environ::core::Scope::Machine)
+        {
+            row_border.Background(MachineBackgroundBrush());
+        }
+        else
+        {
+            row_border.Background(SolidColorBrush{
+                winrt::Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)});
+        }
     }
 
     void MainWindow::RefreshHistoryPage()
@@ -581,17 +622,22 @@ namespace winrt::EnvironNativeBaseline::implementation
     {
         m_activePage = page;
         auto const show_environment{page == ActivePage::Environment};
+        auto const show_history{page == ActivePage::History};
+        auto const show_settings{page == ActivePage::Settings};
 
         EnvironmentPageRoot().Visibility(show_environment ? Visibility::Visible : Visibility::Collapsed);
-        HistoryPageRoot().Visibility(show_environment ? Visibility::Collapsed : Visibility::Visible);
+        HistoryPageRoot().Visibility(show_history ? Visibility::Visible : Visibility::Collapsed);
+        SettingsPageRoot().Visibility(show_settings ? Visibility::Visible : Visibility::Collapsed);
 
         EnvironmentNavButton().Style(nullptr);
         HistoryNavButton().Style(nullptr);
+        SettingsNavButton().Style(nullptr);
 
         EnvironmentNavButton().IsEnabled(!show_environment);
-        HistoryNavButton().IsEnabled(show_environment && m_snapshotStoreAvailable);
+        HistoryNavButton().IsEnabled(!show_history && m_snapshotStoreAvailable);
+        SettingsNavButton().IsEnabled(!show_settings);
 
-        if (!show_environment)
+        if (show_history)
         {
             RefreshHistoryPage();
         }
@@ -628,6 +674,32 @@ namespace winrt::EnvironNativeBaseline::implementation
                 app_window.Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>()};
             presenter.Maximize();
         }
+    }
+
+    void MainWindow::ResetWindowPlacement()
+    {
+        auto const app_window{AppWindow()};
+        auto const presenter{
+            app_window.Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>()};
+        presenter.Restore();
+
+        m_settings.window.maximized.set(false);
+        m_settings.window.x.set(-1);
+        m_settings.window.y.set(-1);
+        m_settings.window.width.set(1100);
+        m_settings.window.height.set(700);
+        m_settings.save();
+
+        RECT rect{
+            .left = 100,
+            .top = 100,
+            .right = 1200,
+            .bottom = 800,
+        };
+        rect = ClampWindowRectToMonitor(rect);
+        app_window.Resize({rect.right - rect.left, rect.bottom - rect.top});
+        app_window.Move({rect.left, rect.top});
+        SettingsSummaryText().Text(L"Saved window placement was reset.");
     }
 
     void MainWindow::SaveWindowPlacement()
@@ -733,8 +805,6 @@ namespace winrt::EnvironNativeBaseline::implementation
                     },
                     m_userVariables,
                     m_machineVariables,
-                    m_isElevated,
-                    is_selected,
                     row_index == 0,
                     IsScalarRow(display_row) ? CurrentScalarValue(display_row) : CurrentPathSegmentValue(display_row),
                     IsScalarRow(display_row)
@@ -1067,6 +1137,41 @@ namespace winrt::EnvironNativeBaseline::implementation
         RoutedEventArgs const&)
     {
         ShowPage(ActivePage::History);
+    }
+
+    void MainWindow::OnSettingsNavButtonClick(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ShowPage(ActivePage::Settings);
+    }
+
+    void MainWindow::OnThemeSelectionChanged(
+        IInspectable const&,
+        Controls::SelectionChangedEventArgs const&)
+    {
+        auto const selected_index{ThemeComboBox().SelectedIndex()};
+        if (selected_index < 0)
+        {
+            return;
+        }
+
+        m_settings.appearance.theme.set(ThemeSettingValue(selected_index));
+        m_settings.save();
+        ApplyThemeSetting();
+        RootLayout().UpdateLayout();
+        RebuildRows();
+        RefreshHistoryPage();
+        RefreshDirtyState();
+
+        SettingsSummaryText().Text(L"Theme is saved immediately.");
+    }
+
+    void MainWindow::OnResetWindowPlacementButtonClick(
+        IInspectable const&,
+        RoutedEventArgs const&)
+    {
+        ResetWindowPlacement();
     }
 
     void MainWindow::OnHistoryListSelectionChanged(

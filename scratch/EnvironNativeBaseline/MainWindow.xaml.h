@@ -18,6 +18,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         {
             Environment,
             History,
+            Settings,
         };
 
         MainWindow();
@@ -30,9 +31,18 @@ namespace winrt::EnvironNativeBaseline::implementation
         void OnHistoryButtonClick(
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnSettingsNavButtonClick(
+            winrt::Windows::Foundation::IInspectable const& sender,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnHistoryListSelectionChanged(
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
+        void OnThemeSelectionChanged(
+            winrt::Windows::Foundation::IInspectable const& sender,
+            winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
+        void OnResetWindowPlacementButtonClick(
+            winrt::Windows::Foundation::IInspectable const& sender,
+            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
         winrt::Windows::Foundation::IAsyncAction OnRestoreSnapshotButtonClick(
             winrt::Windows::Foundation::IInspectable const& sender,
             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
@@ -62,8 +72,12 @@ namespace winrt::EnvironNativeBaseline::implementation
     private:
         void EnsureSelection();
         void LoadVariables();
+        void ApplyThemeSetting();
+        void InitializeSettingsPage();
         void RestoreWindowPlacement();
+        void ResetWindowPlacement();
         void SaveWindowPlacement();
+        [[nodiscard]] winrt::Microsoft::UI::Xaml::ElementTheme EffectiveTheme();
         void RebuildRows();
         void RefreshHistoryPage();
         void UpdateHistoryDetails();
@@ -77,6 +91,15 @@ namespace winrt::EnvironNativeBaseline::implementation
         void RefreshDirtyState();
         void RefreshVariableVisuals(Environ::core::Scope scope, std::size_t variable_index);
         void SetStatus(std::wstring text, bool is_error);
+        [[nodiscard]] winrt::Microsoft::UI::Xaml::Media::Brush SelectionBackgroundBrush();
+        [[nodiscard]] winrt::Microsoft::UI::Xaml::Media::Brush DirtyBackgroundBrush();
+        [[nodiscard]] winrt::Microsoft::UI::Xaml::Media::Brush MachineBackgroundBrush();
+        void ApplySelectionVisual(
+            winrt::Microsoft::UI::Xaml::Controls::Border const& row_border,
+            bool is_selected,
+            bool is_dirty,
+            bool is_elevated,
+            Environ::core::Scope scope);
         void UpdateRowEditor(RowVisual const& row_visual, bool is_selected);
         [[nodiscard]] bool HasDirtyState() const;
         [[nodiscard]] bool IsScalarRow(DisplayRow const& display_row) const;

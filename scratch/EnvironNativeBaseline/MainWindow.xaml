@@ -8,7 +8,8 @@
     mc:Ignorable="d"
     Title="Environ Native Baseline">
 
-    <Grid>
+    <Grid x:Name="RootLayout"
+          Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
         <Grid.Resources>
             <Style x:Key="FlatListViewItemStyle" TargetType="ListViewItem">
                 <Setter Property="Background" Value="Transparent" />
@@ -27,6 +28,7 @@
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="0,0,1,0">
             <StackPanel Margin="16,16,16,16" Spacing="10">
@@ -43,6 +45,11 @@
                 <Button x:Name="HistoryNavButton"
                         Click="OnHistoryButtonClick"
                         Content="History"
+                        HorizontalAlignment="Stretch"
+                        Padding="10,6,10,6" />
+                <Button x:Name="SettingsNavButton"
+                        Click="OnSettingsNavButtonClick"
+                        Content="Settings"
                         HorizontalAlignment="Stretch"
                         Padding="10,6,10,6" />
             </StackPanel>
@@ -177,6 +184,56 @@
                                 Padding="10,4,10,4" />
                     </StackPanel>
                 </Grid>
+            </Grid>
+
+            <Grid x:Name="SettingsPageRoot"
+                  Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Margin="16,12,16,12" Spacing="4">
+                    <TextBlock FontSize="20"
+                               FontWeight="SemiBold"
+                               Text="Settings" />
+                    <TextBlock x:Name="SettingsSummaryText"
+                               Opacity="0.7"
+                               Text="Appearance and window behavior." />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1"
+                            Margin="16,0,16,16"
+                            Spacing="18">
+                    <StackPanel Spacing="6">
+                        <TextBlock FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Text="Theme" />
+                        <TextBlock Opacity="0.7"
+                                   Text="Choose how Environ should render its UI." />
+                        <ComboBox x:Name="ThemeComboBox"
+                                  HorizontalAlignment="Left"
+                                  MinWidth="220"
+                                  SelectionChanged="OnThemeSelectionChanged">
+                            <ComboBoxItem Content="System" Tag="System" />
+                            <ComboBoxItem Content="Light" Tag="Light" />
+                            <ComboBoxItem Content="Dark" Tag="Dark" />
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Spacing="6">
+                        <TextBlock FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Text="Window placement" />
+                        <TextBlock Opacity="0.7"
+                                   Text="Window size and position are restored from the configuration file on startup." />
+                        <Button x:Name="ResetWindowPlacementButton"
+                                Click="OnResetWindowPlacementButtonClick"
+                                Content="Reset saved window placement"
+                                HorizontalAlignment="Left"
+                                Padding="10,4,10,4" />
+                    </StackPanel>
+                </StackPanel>
             </Grid>
         </Grid>
     </Grid>
