@@ -22,21 +22,41 @@
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
             </Style>
         </Grid.Resources>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="180" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <Border Grid.Column="0"
+        <Border Grid.Row="0"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="0,0,1,0">
-            <StackPanel Margin="16,16,16,16" Spacing="10">
-                <TextBlock FontSize="20"
-                           FontWeight="SemiBold"
-                           Text="Environ" />
-                <TextBlock Opacity="0.65"
-                           Text="Native Baseline" />
+                BorderThickness="0,0,0,1">
+            <Grid x:Name="TitleBarDragRegion"
+                  Height="44"
+                  Padding="16,0,140,0">
+                <StackPanel Orientation="Horizontal"
+                            Spacing="12"
+                            VerticalAlignment="Center">
+                    <TextBlock FontSize="18"
+                               FontWeight="SemiBold"
+                               Text="Environ" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,1,0">
+                <StackPanel Margin="16,16,16,16" Spacing="10">
+                    <TextBlock Opacity="0.65"
+                               Text="Navigate" />
                 <Button x:Name="EnvironmentNavButton"
                         Click="OnEnvironmentNavButtonClick"
                         Content="Environment"
@@ -52,11 +72,11 @@
                         Content="Settings"
                         HorizontalAlignment="Stretch"
                         Padding="10,6,10,6" />
-            </StackPanel>
-        </Border>
+                </StackPanel>
+            </Border>
 
-        <Grid Grid.Column="1">
-            <Grid x:Name="EnvironmentPageRoot">
+            <Grid Grid.Column="1">
+                <Grid x:Name="EnvironmentPageRoot">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -67,7 +87,7 @@
                 <StackPanel Grid.Row="0" Margin="16,12,16,12" Spacing="4">
                     <TextBlock FontSize="20"
                                FontWeight="SemiBold"
-                               Text="Environment" />
+                               Text="Environment Variables" />
                     <TextBlock x:Name="SummaryText"
                                Opacity="0.7"
                                Text="Loading environment variables..." />
@@ -131,10 +151,10 @@
                           IsItemClickEnabled="False"
                           SelectionChanged="OnItemsListSelectionChanged"
                           SelectionMode="Single" />
-            </Grid>
+                </Grid>
 
-            <Grid x:Name="HistoryPageRoot"
-                  Visibility="Collapsed">
+                <Grid x:Name="HistoryPageRoot"
+                      Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -184,10 +204,10 @@
                                 Padding="10,4,10,4" />
                     </StackPanel>
                 </Grid>
-            </Grid>
+                </Grid>
 
-            <Grid x:Name="SettingsPageRoot"
-                  Visibility="Collapsed">
+                <Grid x:Name="SettingsPageRoot"
+                      Visibility="Collapsed">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -234,6 +254,7 @@
                                 Padding="10,4,10,4" />
                     </StackPanel>
                 </StackPanel>
+                </Grid>
             </Grid>
         </Grid>
     </Grid>

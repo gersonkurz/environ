@@ -73,6 +73,7 @@ namespace winrt::EnvironNativeBaseline::implementation
         void EnsureSelection();
         void LoadVariables();
         void ApplyThemeSetting();
+        void ConfigureTitleBar();
         void InitializeSettingsPage();
         void RestoreWindowPlacement();
         void ResetWindowPlacement();

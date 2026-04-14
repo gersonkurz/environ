@@ -425,6 +425,7 @@ namespace winrt::EnvironNativeBaseline::implementation
     MainWindow::MainWindow()
     {
         InitializeComponent();
+        ConfigureTitleBar();
         m_settings.load();
         ApplyThemeSetting();
         InitializeSettingsPage();
@@ -438,6 +439,23 @@ namespace winrt::EnvironNativeBaseline::implementation
         {
             SaveWindowPlacement();
         });
+    }
+
+    void MainWindow::ConfigureTitleBar()
+    {
+        Title(L"Environ");
+        SystemBackdrop(MicaBackdrop{});
+        ExtendsContentIntoTitleBar(true);
+        SetTitleBar(TitleBarDragRegion());
+
+        if (!winrt::Microsoft::UI::Windowing::AppWindowTitleBar::IsCustomizationSupported())
+        {
+            return;
+        }
+
+        auto const title_bar{AppWindow().TitleBar()};
+        title_bar.ExtendsContentIntoTitleBar(true);
+        title_bar.PreferredHeightOption(winrt::Microsoft::UI::Windowing::TitleBarHeightOption::Tall);
     }
 
     void MainWindow::LoadVariables()
