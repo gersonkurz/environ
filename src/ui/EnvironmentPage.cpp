@@ -20,6 +20,7 @@ constexpr double kNameColumnWidth{200.0};
 constexpr double kScopeColumnWidth{80.0};
 constexpr double kColumnSpacing{8.0};
 constexpr double kRowMinHeight{32.0};
+constexpr bool kSimpleScrollIsolation{true};
 
 struct VariableRef {
     Environ::core::Scope scope;
@@ -313,26 +314,6 @@ EnvironmentPage::EnvironmentPage(Environ::core::SnapshotStore& snapshot_store,
     m_root.Padding(ThicknessHelper::FromLengths(24, 24, 24, 24));
     m_root.Background(SolidColorBrush{winrt::Windows::UI::Colors::Transparent()});
 
-    // Catch-all: wheel anywhere on the page scrolls the variable list
-    m_root.PointerWheelChanged([this](winrt::Windows::Foundation::IInspectable const&,
-                                      winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
-        if (!m_scrollViewer) return;
-
-        const auto point{args.GetCurrentPoint(m_scrollViewer)};
-        const auto delta{point.Properties().MouseWheelDelta()};
-        const bool ctrl{(static_cast<uint32_t>(args.KeyModifiers()) &
-                        static_cast<uint32_t>(winrt::Windows::System::VirtualKeyModifiers::Control)) != 0};
-
-        if (ctrl) {
-            const auto step{static_cast<float>(delta) / 120.0f * 0.1f};
-            const auto new_zoom{std::clamp(m_scrollViewer.ZoomFactor() + step, 0.5f, 3.0f)};
-            m_scrollViewer.ChangeView(nullptr, nullptr, new_zoom);
-        } else {
-            m_scrollViewer.ChangeView(nullptr, m_scrollViewer.VerticalOffset() - static_cast<double>(delta), nullptr, true);
-        }
-        args.Handled(true);
-    });
-
     m_elevated = Environ::core::is_elevated();
     Refresh();
 }
@@ -545,6 +526,57 @@ void EnvironmentPage::BuildList(Grid const& parent) {
 
     Grid::SetRow(header_wrapper, 1);
     parent.Children().Append(header_wrapper);
+
+    const bool simple_scroll_isolation{kSimpleScrollIsolation};
+    if (simple_scroll_isolation) {
+        auto list_view{ListView{}};
+        list_view.Margin(ThicknessHelper::FromLengths(0, 4, 0, 0));
+        list_view.IsItemClickEnabled(false);
+        list_view.SelectionMode(ListViewSelectionMode::None);
+        list_view.SingleSelectionFollowsFocus(false);
+
+        auto items{winrt::single_threaded_observable_vector<winrt::Windows::Foundation::IInspectable>()};
+        for (const auto& ref : refs) {
+            const auto& variable{ref.scope == Environ::core::Scope::User
+                ? m_userVariables[ref.index]
+                : m_machineVariables[ref.index]};
+
+            if (!MatchesFilter(variable, m_filterText)) continue;
+
+            auto row{StackPanel{}};
+            row.Spacing(2);
+            row.Padding(ThicknessHelper::FromLengths(8, 6, 8, 6));
+
+            auto header_text{TextBlock{}};
+            auto scope_label{ref.scope == Environ::core::Scope::User ? L"User" : L"Machine"};
+            header_text.Text(std::wstring{scope_label} + L"  " + variable.name);
+            header_text.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+            row.Children().Append(header_text);
+
+            if (variable.kind == Environ::core::EnvVariableKind::PathList && !variable.segments.empty()) {
+                for (auto const& segment : variable.segments) {
+                    auto value_text{TextBlock{}};
+                    value_text.Text(segment);
+                    value_text.TextWrapping(TextWrapping::Wrap);
+                    value_text.Margin(ThicknessHelper::FromLengths(16, 0, 0, 0));
+                    row.Children().Append(value_text);
+                }
+            } else {
+                auto value_text{TextBlock{}};
+                value_text.Text(variable.value);
+                value_text.TextWrapping(TextWrapping::Wrap);
+                value_text.Margin(ThicknessHelper::FromLengths(16, 0, 0, 0));
+                row.Children().Append(value_text);
+            }
+
+            items.Append(row);
+        }
+
+        list_view.ItemsSource(items);
+        Grid::SetRow(list_view, 2);
+        parent.Children().Append(list_view);
+        return;
+    }
 
     // --- Scrollable content ---
     m_scrollViewer = ScrollViewer{};

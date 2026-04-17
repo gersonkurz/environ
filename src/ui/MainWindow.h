@@ -31,7 +31,8 @@ struct MainWindow
 
 private:
     winrt::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider m_provider;
-    winrt::Microsoft::UI::Xaml::Controls::NavigationView m_navView;
+    winrt::Microsoft::UI::Xaml::Controls::Grid m_root;
+    winrt::Microsoft::UI::Xaml::Controls::ContentControl m_contentHost;
     std::unique_ptr<EnvironmentPage> m_envPage;
     std::unique_ptr<HistoryPage> m_historyPage;
     std::unique_ptr<SettingsPage> m_settingsPage;
@@ -42,6 +43,9 @@ private:
     void RestoreWindowPlacement();
     void SaveWindowPlacement();
     void ApplyTheme();
+    void ShowEnvironmentPage();
+    void ShowHistoryPage();
+    void ShowSettingsPage();
 
     winrt::Microsoft::UI::Xaml::Controls::TextBlock MakePlaceholder(winrt::hstring const& text);
 };

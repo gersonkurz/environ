@@ -34,7 +34,9 @@ void MainWindow::ApplyTheme() {
         theme = winrt::Microsoft::UI::Xaml::ElementTheme::Dark;
     }
 
-    m_navView.RequestedTheme(theme);
+    if (m_root) {
+        m_root.RequestedTheme(theme);
+    }
 }
 
 void MainWindow::RestoreWindowPlacement() {
@@ -84,85 +86,18 @@ void MainWindow::InitializeComponent() {
 
     Title(L"Environ");
     SystemBackdrop(MicaBackdrop{});
-    ExtendsContentIntoTitleBar(true);
+    m_root = Grid{};
+    m_contentHost = ContentControl{};
 
-    // Custom title bar: just a draggable area with the app name
-    auto title_bar{Grid{}};
-    title_bar.Height(48);
-    title_bar.Padding(ThicknessHelper::FromLengths(16, 0, 0, 0));
-
-    auto title_icon{FontIcon{}};
-    title_icon.Glyph(L"\uE774");
-    title_icon.FontSize(14);
-    title_icon.VerticalAlignment(VerticalAlignment::Center);
-    title_icon.Margin(ThicknessHelper::FromLengths(0, 0, 8, 0));
-
-    auto title_label{TextBlock{}};
-    title_label.Text(L"Environ");
-    title_label.FontSize(13);
-    title_label.VerticalAlignment(VerticalAlignment::Center);
-
-    auto title_content{StackPanel{}};
-    title_content.Orientation(Orientation::Horizontal);
-    title_content.VerticalAlignment(VerticalAlignment::Center);
-    title_content.Children().Append(title_icon);
-    title_content.Children().Append(title_label);
-    title_bar.Children().Append(title_content);
-
-    SetTitleBar(title_bar);
-
-    // -- NavigationView --------------------------------------------------
-    m_navView = NavigationView{};
-    m_navView.IsSettingsVisible(false);
-    m_navView.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);
-    m_navView.IsTitleBarAutoPaddingEnabled(true);
+    auto header_row{RowDefinition{}};
+    header_row.Height(GridLengthHelper::Auto());
+    auto content_row{RowDefinition{}};
+    content_row.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    m_root.RowDefinitions().Append(header_row);
+    m_root.RowDefinitions().Append(content_row);
 
     // Apply theme BEFORE creating pages so ThemeBrush lookups resolve correctly
     ApplyTheme();
-
-    auto envItem{NavigationViewItem{}};
-    envItem.Content(winrt::box_value(L"Environ"));
-    auto globeIcon{FontIcon{}};
-    globeIcon.Glyph(L"\uE774");
-    envItem.Icon(globeIcon);
-    envItem.Tag(winrt::box_value(L"env"));
-
-    auto settingsItem{NavigationViewItem{}};
-    settingsItem.Content(winrt::box_value(L"Settings"));
-    auto settingIcon{FontIcon{}};
-    settingIcon.Glyph(L"\uE713");
-    settingsItem.Icon(settingIcon);
-    settingsItem.Tag(winrt::box_value(L"settings"));
-
-    auto aboutItem{NavigationViewItem{}};
-    aboutItem.Content(winrt::box_value(L"About"));
-    auto infoIcon{FontIcon{}};
-    infoIcon.Glyph(L"\uE946");
-    aboutItem.Icon(infoIcon);
-    aboutItem.Tag(winrt::box_value(L"about"));
-
-    auto historyItem{NavigationViewItem{}};
-    historyItem.Content(winrt::box_value(L"History"));
-    auto historyIcon{FontIcon{}};
-    historyIcon.Glyph(L"\uE81C");
-    historyItem.Icon(historyIcon);
-    historyItem.Tag(winrt::box_value(L"history"));
-
-    m_navView.MenuItems().Append(envItem);
-    m_navView.MenuItems().Append(historyItem);
-
-    if (!Environ::core::is_elevated()) {
-        auto adminItem{NavigationViewItem{}};
-        adminItem.Content(winrt::box_value(L"Restart as Admin"));
-        auto shieldIcon{FontIcon{}};
-        shieldIcon.Glyph(L"\uE7EF");
-        adminItem.Icon(shieldIcon);
-        adminItem.Tag(winrt::box_value(L"admin"));
-        m_navView.FooterMenuItems().Append(adminItem);
-    }
-
-    m_navView.FooterMenuItems().Append(settingsItem);
-    m_navView.FooterMenuItems().Append(aboutItem);
 
     // Get HWND for file dialogs
     HWND hwnd{nullptr};
@@ -180,51 +115,111 @@ void MainWindow::InitializeComponent() {
         m_envPage->Refresh();
     });
 
-    m_navView.Content(m_envPage->Root());
-    m_navView.SelectedItem(envItem);
+    auto header{Grid{}};
+    header.Padding(ThicknessHelper::FromLengths(16, 12, 16, 12));
 
-    m_navView.SelectionChanged(
-        [this](NavigationView const&,
-               NavigationViewSelectionChangedEventArgs const& args) {
-            auto item{args.SelectedItem()
-                          .as<NavigationViewItem>()};
-            auto tag{winrt::unbox_value<winrt::hstring>(item.Tag())};
-            if (tag == L"env") {
-                m_navView.Content(m_envPage->Root());
-            } else if (tag == L"history") {
-                m_historyPage->Refresh();
-                m_navView.Content(m_historyPage->Root());
-            } else if (tag == L"settings") {
-                m_navView.Content(m_settingsPage->Root());
-            } else if (tag == L"admin") {
-                wchar_t exe_path[MAX_PATH]{};
-                GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
-                auto result{reinterpret_cast<INT_PTR>(
-                    ShellExecuteW(nullptr, L"runas", exe_path, nullptr, nullptr, SW_SHOWNORMAL))};
-                if (result > 32) {
-                    Close();
-                }
-                // If result <= 32 (user cancelled UAC or error), stay open
-            } else if (tag == L"about") {
-                ShellExecuteW(nullptr, L"open", L"https://github.com/gersonkurz/environ", nullptr, nullptr, SW_SHOWNORMAL);
-            }
+    auto title_col{ColumnDefinition{}};
+    title_col.Width(GridLengthHelper::Auto());
+    auto spacer_col{ColumnDefinition{}};
+    spacer_col.Width(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
+    auto actions_col{ColumnDefinition{}};
+    actions_col.Width(GridLengthHelper::Auto());
+    header.ColumnDefinitions().Append(title_col);
+    header.ColumnDefinitions().Append(spacer_col);
+    header.ColumnDefinitions().Append(actions_col);
+
+    auto title{TextBlock{}};
+    title.Text(L"Environ");
+    title.FontSize(20);
+    title.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+    title.VerticalAlignment(VerticalAlignment::Center);
+    Grid::SetColumn(title, 0);
+    header.Children().Append(title);
+
+    auto actions{StackPanel{}};
+    actions.Orientation(Orientation::Horizontal);
+    actions.Spacing(8);
+
+    auto env_button{Button{}};
+    env_button.Content(winrt::box_value(L"Environment"));
+    env_button.Click([this](winrt::Windows::Foundation::IInspectable const&,
+                            RoutedEventArgs const&) {
+        ShowEnvironmentPage();
+    });
+    actions.Children().Append(env_button);
+
+    auto history_button{Button{}};
+    history_button.Content(winrt::box_value(L"History"));
+    history_button.Click([this](winrt::Windows::Foundation::IInspectable const&,
+                                RoutedEventArgs const&) {
+        ShowHistoryPage();
+    });
+    actions.Children().Append(history_button);
+
+    auto settings_button{Button{}};
+    settings_button.Content(winrt::box_value(L"Settings"));
+    settings_button.Click([this](winrt::Windows::Foundation::IInspectable const&,
+                                 RoutedEventArgs const&) {
+        ShowSettingsPage();
+    });
+    actions.Children().Append(settings_button);
+
+    if (!Environ::core::is_elevated()) {
+        auto admin_button{Button{}};
+        admin_button.Content(winrt::box_value(L"Restart as Admin"));
+        admin_button.Click([](winrt::Windows::Foundation::IInspectable const&,
+                              RoutedEventArgs const&) {
+            wchar_t exe_path[MAX_PATH]{};
+            GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+            ShellExecuteW(nullptr, L"runas", exe_path, nullptr, nullptr, SW_SHOWNORMAL);
         });
+        actions.Children().Append(admin_button);
+    }
 
-    // Stack title bar above navigation view
-    auto root_grid{Grid{}};
-    auto title_row{RowDefinition{}};
-    title_row.Height(GridLengthHelper::Auto());
-    auto content_row{RowDefinition{}};
-    content_row.Height(GridLengthHelper::FromValueAndType(1, GridUnitType::Star));
-    root_grid.RowDefinitions().Append(title_row);
-    root_grid.RowDefinitions().Append(content_row);
+    auto about_button{Button{}};
+    about_button.Content(winrt::box_value(L"About"));
+    about_button.Click([](winrt::Windows::Foundation::IInspectable const&,
+                          RoutedEventArgs const&) {
+        ShellExecuteW(nullptr, L"open", L"https://github.com/gersonkurz/environ", nullptr, nullptr, SW_SHOWNORMAL);
+    });
+    actions.Children().Append(about_button);
 
-    Grid::SetRow(title_bar, 0);
-    Grid::SetRow(m_navView, 1);
-    root_grid.Children().Append(title_bar);
-    root_grid.Children().Append(m_navView);
+    Grid::SetColumn(actions, 2);
+    header.Children().Append(actions);
 
-    Content(root_grid);
+    Grid::SetRow(header, 0);
+    m_root.Children().Append(header);
+
+    Grid::SetRow(m_contentHost, 1);
+    m_root.Children().Append(m_contentHost);
+
+    auto list_view{ListView{}};
+    list_view.SelectionMode(ListViewSelectionMode::None);
+    list_view.IsItemClickEnabled(false);
+
+    auto items{winrt::single_threaded_observable_vector<winrt::Windows::Foundation::IInspectable>()};
+    for (int i{0}; i < 200; ++i) {
+        auto text{TextBlock{}};
+        text.Text(std::format(L"Item {}", i));
+        text.Margin(ThicknessHelper::FromLengths(8, 6, 8, 6));
+        items.Append(text);
+    }
+    list_view.ItemsSource(items);
+    m_contentHost.Content(list_view);
+    Content(m_root);
+}
+
+void MainWindow::ShowEnvironmentPage() {
+    m_contentHost.Content(m_envPage->Root());
+}
+
+void MainWindow::ShowHistoryPage() {
+    m_historyPage->Refresh();
+    m_contentHost.Content(m_historyPage->Root());
+}
+
+void MainWindow::ShowSettingsPage() {
+    m_contentHost.Content(m_settingsPage->Root());
 }
 
 winrt::Microsoft::UI::Xaml::Controls::TextBlock

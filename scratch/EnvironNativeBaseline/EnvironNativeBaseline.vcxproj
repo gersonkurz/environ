@@ -17,7 +17,7 @@
     <ProjectGuid>{5E1C5A24-AB52-4AF7-8D5B-5D5084DD5C2B}</ProjectGuid>
     <ProjectName>EnvironNativeBaseline</ProjectName>
     <RootNamespace>EnvironNativeBaseline</RootNamespace>
-    <TargetName>$(RootNamespace)</TargetName>
+    <TargetName>environ</TargetName>
     <DefaultLanguage>en-US</DefaultLanguage>
     <MinimumVisualStudioVersion>16.0</MinimumVisualStudioVersion>
     <AppContainerApplication>false</AppContainerApplication>
@@ -55,6 +55,11 @@
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="packages\\Microsoft.Windows.CppWinRT.2.0.240405.15\\build\\native\\Microsoft.Windows.CppWinRT.props" Condition="exists('packages\\Microsoft.Windows.CppWinRT.2.0.240405.15\\build\\native\\Microsoft.Windows.CppWinRT.props')" />
+    <Import Project="packages\\Microsoft.WindowsAppSDK.Base.1.8.251216001\\build\\native\\Microsoft.WindowsAppSDK.Base.props" Condition="exists('packages\\Microsoft.WindowsAppSDK.Base.1.8.251216001\\build\\native\\Microsoft.WindowsAppSDK.Base.props')" />
+    <Import Project="packages\\Microsoft.WindowsAppSDK.Foundation.1.8.260222000\\build\\native\\Microsoft.WindowsAppSDK.Foundation.props" Condition="exists('packages\\Microsoft.WindowsAppSDK.Foundation.1.8.260222000\\build\\native\\Microsoft.WindowsAppSDK.Foundation.props')" />
+    <Import Project="packages\\Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260125001\\build\\native\\Microsoft.WindowsAppSDK.InteractiveExperiences.props" Condition="exists('packages\\Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260125001\\build\\native\\Microsoft.WindowsAppSDK.InteractiveExperiences.props')" />
+    <Import Project="packages\\Microsoft.WindowsAppSDK.1.8.260317003\\build\\native\\Microsoft.WindowsAppSDK.props" Condition="exists('packages\\Microsoft.WindowsAppSDK.1.8.260317003\\build\\native\\Microsoft.WindowsAppSDK.props')" />
+    <Import Project="packages\\Microsoft.WindowsAppSDK.WinUI.1.8.260224000\\build\\native\\Microsoft.WindowsAppSDK.WinUI.props" Condition="exists('packages\\Microsoft.WindowsAppSDK.WinUI.1.8.260224000\\build\\native\\Microsoft.WindowsAppSDK.WinUI.props')" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
@@ -146,8 +151,20 @@
       <ErrorText>This project requires NuGet package restore. Missing file: {0}.</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('packages\\Microsoft.Windows.CppWinRT.2.0.240405.15\\build\\native\\Microsoft.Windows.CppWinRT.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\\Microsoft.Windows.CppWinRT.2.0.240405.15\\build\\native\\Microsoft.Windows.CppWinRT.props'))" />
+    <Error Condition="!Exists('packages\\Microsoft.Web.WebView2.1.0.3179.45\\build\\native\\Microsoft.Web.WebView2.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\\Microsoft.Web.WebView2.1.0.3179.45\\build\\native\\Microsoft.Web.WebView2.targets'))" />
+    <Error Condition="!Exists('packages\\Microsoft.WindowsAppSDK.Base.1.8.251216001\\build\\native\\Microsoft.WindowsAppSDK.Base.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\\Microsoft.WindowsAppSDK.Base.1.8.251216001\\build\\native\\Microsoft.WindowsAppSDK.Base.props'))" />
+    <Error Condition="!Exists('packages\\Microsoft.WindowsAppSDK.Foundation.1.8.260222000\\build\\native\\Microsoft.WindowsAppSDK.Foundation.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\\Microsoft.WindowsAppSDK.Foundation.1.8.260222000\\build\\native\\Microsoft.WindowsAppSDK.Foundation.props'))" />
+    <Error Condition="!Exists('packages\\Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260125001\\build\\native\\Microsoft.WindowsAppSDK.InteractiveExperiences.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\\Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260125001\\build\\native\\Microsoft.WindowsAppSDK.InteractiveExperiences.props'))" />
+    <Error Condition="!Exists('packages\\Microsoft.WindowsAppSDK.1.8.260317003\\build\\native\\Microsoft.WindowsAppSDK.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\\Microsoft.WindowsAppSDK.1.8.260317003\\build\\native\\Microsoft.WindowsAppSDK.props'))" />
+    <Error Condition="!Exists('packages\\Microsoft.WindowsAppSDK.WinUI.1.8.260224000\\build\\native\\Microsoft.WindowsAppSDK.WinUI.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\\Microsoft.WindowsAppSDK.WinUI.1.8.260224000\\build\\native\\Microsoft.WindowsAppSDK.WinUI.props'))" />
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
   <Import Project="packages\\Microsoft.Windows.CppWinRT.2.0.240405.15\\build\\native\\Microsoft.Windows.CppWinRT.targets" Condition="exists('packages\\Microsoft.Windows.CppWinRT.2.0.240405.15\\build\\native\\Microsoft.Windows.CppWinRT.targets')" />
+  <Import Project="packages\\Microsoft.Web.WebView2.1.0.3179.45\\build\\native\\Microsoft.Web.WebView2.targets" Condition="exists('packages\\Microsoft.Web.WebView2.1.0.3179.45\\build\\native\\Microsoft.Web.WebView2.targets')" />
+  <Import Project="packages\\Microsoft.WindowsAppSDK.Base.1.8.251216001\\build\\native\\Microsoft.WindowsAppSDK.Base.targets" Condition="exists('packages\\Microsoft.WindowsAppSDK.Base.1.8.251216001\\build\\native\\Microsoft.WindowsAppSDK.Base.targets')" />
+  <Import Project="packages\\Microsoft.WindowsAppSDK.Foundation.1.8.260222000\\build\\native\\Microsoft.WindowsAppSDK.Foundation.targets" Condition="exists('packages\\Microsoft.WindowsAppSDK.Foundation.1.8.260222000\\build\\native\\Microsoft.WindowsAppSDK.Foundation.targets')" />
+  <Import Project="packages\\Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260125001\\build\\native\\Microsoft.WindowsAppSDK.InteractiveExperiences.targets" Condition="exists('packages\\Microsoft.WindowsAppSDK.InteractiveExperiences.1.8.260125001\\build\\native\\Microsoft.WindowsAppSDK.InteractiveExperiences.targets')" />
+  <Import Project="packages\\Microsoft.WindowsAppSDK.WinUI.1.8.260224000\\build\\native\\Microsoft.WindowsAppSDK.WinUI.targets" Condition="exists('packages\\Microsoft.WindowsAppSDK.WinUI.1.8.260224000\\build\\native\\Microsoft.WindowsAppSDK.WinUI.targets')" />
+  <Import Project="packages\\Microsoft.WindowsAppSDK.1.8.260317003\\build\\native\\Microsoft.WindowsAppSDK.targets" Condition="exists('packages\\Microsoft.WindowsAppSDK.1.8.260317003\\build\\native\\Microsoft.WindowsAppSDK.targets')" />
 </Project>
