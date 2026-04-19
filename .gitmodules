@@ -10,3 +10,6 @@
 [submodule "extern/sqlite3"]
 	path = extern/sqlite3
 	url = https://github.com/gittiver/sqlite3-amalgamation
+[submodule "extern/wil"]
+	path = extern/wil
+	url = https://github.com/microsoft/wil.git
