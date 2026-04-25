@@ -1,0 +1,23 @@
+namespace Environ
+{
+    runtimeclass EnvVariableViewModel : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        EnvVariableViewModel();
+        String Name;
+        String OriginalName;
+        String Value;
+        String OriginalValue;
+        String Scope;
+        String ScopeGlyph;
+        Boolean IsReadOnly;
+        Double RowOpacity{ get; };
+        Boolean IsDirty{ get; };
+        Boolean IsPathSegment{ get; };
+        Boolean IsNameReadOnly{ get; };
+        Boolean IsNameEditable{ get; };
+        Int32 ValidationSeverity;
+        String ValidationTooltip;
+        String Description;
+        Boolean HasDescription{ get; };
+    }
+}

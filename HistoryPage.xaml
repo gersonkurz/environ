@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="Environ.HistoryPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Environ"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Loaded="OnPageLoaded">
+
+    <Grid Padding="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="History"
+                       Style="{StaticResource TitleTextBlockStyle}"/>
+            <Button Grid.Column="1" x:Name="RestoreButton"
+                    Content="Restore" Click="OnRestoreClick"
+                    IsEnabled="False" VerticalAlignment="Center"/>
+        </Grid>
+
+        <!-- Restore result feedback -->
+        <InfoBar Grid.Row="1"
+                 x:Name="RestoreResultBar"
+                 IsOpen="False"
+                 IsClosable="True"
+                 Margin="0,0,0,8"/>
+
+        <!-- Empty state -->
+        <TextBlock Grid.Row="2"
+                   x:Name="EmptyMessage"
+                   Text="No snapshots yet. Snapshots are created automatically when you save changes."
+                   Style="{StaticResource BodyTextBlockStyle}"
+                   Opacity="0.6"
+                   Visibility="Collapsed"/>
+
+        <!-- Snapshot list -->
+        <ListView Grid.Row="3"
+                  x:Name="SnapshotList"
+                  ItemsSource="{x:Bind Snapshots}"
+                  SelectionMode="Single"
+                  SelectionChanged="OnSnapshotSelected">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Padding" Value="12,8,12,8"/>
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="local:HistoryEntryViewModel">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="60"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Column="0" Grid.Row="0"
+                                   Text="{x:Bind Timestamp}"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                        <TextBlock Grid.Column="1" Grid.Row="0"
+                                   Text="{x:Bind ScopeBadge}"
+                                   Opacity="0.5"/>
+                        <TextBlock Grid.Column="2" Grid.Row="0"
+                                   Text="{x:Bind Label}"
+                                   TextTrimming="CharacterEllipsis"/>
+
+                        <TextBlock Grid.Column="0" Grid.ColumnSpan="3" Grid.Row="1"
+                                   Text="{x:Bind Changes}"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Opacity="0.5"
+                                   TextWrapping="Wrap"
+                                   MaxLines="3"/>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Page>

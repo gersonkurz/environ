@@ -1,7 +1,10 @@
 # Build output
-build/
-packages/
+ARM64/
+Debug/
 Generated Files/
+Release/
+x64/
+packages/
 
 # Visual Studio
 .vs/

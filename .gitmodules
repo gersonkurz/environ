@@ -1,15 +1,12 @@
-[submodule "extern/spdlog"]
-	path = extern/spdlog
-	url = https://github.com/gabime/spdlog.git
 [submodule "extern/pnq"]
 	path = extern/pnq
 	url = https://github.com/gersonkurz/pnq.git
-[submodule "extern/tomlplusplus"]
-	path = extern/tomlplusplus
-	url = https://github.com/marzer/tomlplusplus.git
-[submodule "extern/sqlite3"]
-	path = extern/sqlite3
+[submodule "Extern/spdlog"]
+	path = Extern/spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "Extern/sqlite3-amalgamation"]
+	path = Extern/sqlite3-amalgamation
 	url = https://github.com/gittiver/sqlite3-amalgamation
-[submodule "extern/wil"]
-	path = extern/wil
-	url = https://github.com/microsoft/wil.git
+[submodule "Extern/tomlplusplus"]
+	path = Extern/tomlplusplus
+	url = https://github.com/marzer/tomlplusplus.git

@@ -1,0 +1,9 @@
+namespace Environ
+{
+    [default_interface]
+    runtimeclass HistoryPage : Microsoft.UI.Xaml.Controls.Page
+    {
+        HistoryPage();
+        Windows.Foundation.Collections.IObservableVector<Object> Snapshots{ get; };
+    }
+}

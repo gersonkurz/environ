@@ -1,0 +1,11 @@
+namespace Environ
+{
+    [default_interface]
+    runtimeclass EnvironmentPage : Microsoft.UI.Xaml.Controls.Page
+    {
+        EnvironmentPage();
+        Windows.Foundation.Collections.IObservableVector<Object> Variables{ get; };
+        Boolean HasUnsavedChanges{ get; };
+        Windows.Foundation.IAsyncOperation<Boolean> SaveChangesAsync();
+    }
+}

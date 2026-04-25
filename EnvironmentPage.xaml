@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="Environ.EnvironmentPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Environ"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Loaded="OnPageLoaded">
+
+    <Grid Padding="16,0,16,16" PointerWheelChanged="OnGridPointerWheelChanged">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Admin info bar (shown when not elevated) -->
+        <InfoBar Grid.Row="0"
+                 x:Name="AdminInfoBar"
+                 Title="Machine variables are read-only"
+                 Message="Restart as administrator to edit them."
+                 IsOpen="False"
+                 IsClosable="False"
+                 Severity="Informational"
+                 Margin="0,0,0,8">
+            <InfoBar.ActionButton>
+                <Button Content="Restart as Admin" Click="OnRestartAsAdminClick"/>
+            </InfoBar.ActionButton>
+        </InfoBar>
+
+        <!-- Save result feedback -->
+        <InfoBar Grid.Row="1"
+                 x:Name="SaveResultBar"
+                 IsOpen="False"
+                 IsClosable="True"
+                 Margin="0,0,0,8"/>
+
+        <!-- Filter + action buttons -->
+        <Grid Grid.Row="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox Grid.Column="0"
+                     x:Name="FilterBox"
+                     PlaceholderText="Filter variables..."
+                     TextChanged="OnFilterChanged"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="8,0,0,0">
+                <DropDownButton Content="New">
+                    <DropDownButton.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="New User Variable" Click="OnNewUserVariable">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE77B;"/>
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem Text="New Machine Variable" Click="OnNewMachineVariable">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE7F8;"/>
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+                <Button Content="Save" Style="{StaticResource AccentButtonStyle}"
+                        Click="OnSaveClick">
+                    <Button.KeyboardAccelerators>
+                        <KeyboardAccelerator Modifiers="Control" Key="S"/>
+                    </Button.KeyboardAccelerators>
+                </Button>
+                <Button Content="Discard" Click="OnDiscardClick"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Column headers -->
+        <Grid Grid.Row="3" Padding="16,8,12,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="4"/>
+                <ColumnDefinition Width="200"/>
+                <ColumnDefinition Width="36"/>
+                <ColumnDefinition Width="24"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="1" Text="Name" FontWeight="SemiBold"/>
+            <TextBlock Grid.Column="4" Text="Value" FontWeight="SemiBold"/>
+        </Grid>
+
+        <!-- Variable list -->
+        <ListView Grid.Row="4"
+                  x:Name="VariableList"
+                  ItemsSource="{x:Bind Variables}"
+                  SelectionMode="Single"
+                  ContainerContentChanging="OnContainerContentChanging"
+                  RenderTransformOrigin="0,0">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Padding" Value="12,2,12,2"/>
+                    <Setter Property="MinHeight" Value="32"/>
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="local:EnvVariableViewModel">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="4"/>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="24"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Dirty indicator -->
+                        <Border Grid.Column="0"
+                                Width="3"
+                                CornerRadius="1.5"
+                                HorizontalAlignment="Left"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                Visibility="{x:Bind IsDirty, Mode=OneWay}"/>
+
+                        <!-- Editable name (hidden on path segment rows) -->
+                        <TextBox Grid.Column="1"
+                                 Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 IsReadOnly="{x:Bind IsNameReadOnly}"
+                                 Visibility="{x:Bind IsNameEditable}"
+                                 VerticalAlignment="Center"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 Padding="4,4,4,4"
+                                 Opacity="{x:Bind RowOpacity}"/>
+
+                        <!-- Scope icon -->
+                        <FontIcon Grid.Column="2"
+                                  Glyph="{x:Bind ScopeGlyph}"
+                                  FontSize="14"
+                                  VerticalAlignment="Center"
+                                  HorizontalAlignment="Center"
+                                  Opacity="0.5"
+                                  ToolTipService.ToolTip="{x:Bind Scope}"/>
+
+                        <!-- Description info icon -->
+                        <FontIcon Grid.Column="3"
+                                  Glyph="&#xE946;"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  HorizontalAlignment="Center"
+                                  Opacity="0.6"
+                                  Visibility="{x:Bind HasDescription, Mode=OneTime}"
+                                  ToolTipService.ToolTip="{x:Bind Description, Mode=OneTime}"/>
+
+                        <!-- Editable value -->
+                        <TextBox Grid.Column="4"
+                                 Text="{x:Bind Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 IsReadOnly="{x:Bind IsReadOnly}"
+                                 VerticalAlignment="Center"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 Padding="4,4,4,4"
+                                 Opacity="{x:Bind RowOpacity}"/>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Page>

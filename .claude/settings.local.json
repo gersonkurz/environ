@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(copy \"C:\\\\Projects\\\\environ\\\\src\\\\core\\\\EnvStore.h\" \"C:\\\\Projects\\\\2026\\\\Environ\\\\core\"\" && copy \"C:ProjectsenvironsrccoreEnvStore.cpp\" \"C:Projects2026Environcore\"\")",
+      "Bash(copy \"C:\\\\Projects\\\\environ\\\\src\\\\core\\\\EnvWriter.h\" \"C:\\\\Projects\\\\2026\\\\Environ\\\\core\"\" && copy \"C:ProjectsenvironsrccoreEnvWriter.cpp\" \"C:Projects2026Environcore\"\")",
+      "Bash(copy \"C:\\\\Projects\\\\environ\\\\src\\\\core\\\\SnapshotStore.h\" \"C:\\\\Projects\\\\2026\\\\Environ\\\\core\"\" && copy \"C:ProjectsenvironsrccoreSnapshotStore.cpp\" \"C:Projects2026Environcore\"\")",
+      "Bash(copy \"C:\\\\Projects\\\\environ\\\\src\\\\core\\\\AppSettings.h\" \"C:\\\\Projects\\\\2026\\\\Environ\\\\core\"\" && copy \"C:ProjectsenvironsrccoreAppSettings.cpp\" \"C:Projects2026Environcore\"\")",
+      "WebSearch",
+      "WebFetch(domain:nicksnettravels.builttoroam.com)",
+      "Bash(reg query:*)",
+      "Bash(find:*)",
+      "Bash(msbuild:*)"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+namespace Environ
+{
+    runtimeclass HistoryEntryViewModel
+    {
+        HistoryEntryViewModel();
+        Int64 Id;
+        String Timestamp;
+        String Label;
+        String ScopeBadge;
+        String Changes;
+    }
+}
