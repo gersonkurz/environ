@@ -19,7 +19,9 @@ std::string AppSettings::config_path() {
     std::filesystem::path dir{appdata};
     CoTaskMemFree(appdata);
     dir /= L"environ";
-    std::filesystem::create_directories(dir);
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) return {};
     return (dir / "environ.toml").string();
 }
 

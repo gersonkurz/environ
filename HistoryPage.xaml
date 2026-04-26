@@ -14,6 +14,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -36,8 +37,17 @@
                  IsClosable="True"
                  Margin="0,0,0,8"/>
 
+        <!-- External changes since last snapshot -->
+        <InfoBar Grid.Row="2"
+                 x:Name="ExternalChangesBar"
+                 Title="External changes detected"
+                 IsOpen="False"
+                 IsClosable="True"
+                 Severity="Informational"
+                 Margin="0,0,0,8"/>
+
         <!-- Empty state -->
-        <TextBlock Grid.Row="2"
+        <TextBlock Grid.Row="3"
                    x:Name="EmptyMessage"
                    Text="No snapshots yet. Snapshots are created automatically when you save changes."
                    Style="{StaticResource BodyTextBlockStyle}"
@@ -45,11 +55,12 @@
                    Visibility="Collapsed"/>
 
         <!-- Snapshot list -->
-        <ListView Grid.Row="3"
+        <ListView Grid.Row="4"
                   x:Name="SnapshotList"
                   ItemsSource="{x:Bind Snapshots}"
                   SelectionMode="Single"
-                  SelectionChanged="OnSnapshotSelected">
+                  SelectionChanged="OnSnapshotSelected"
+                  ContainerContentChanging="OnContainerContentChanging">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>

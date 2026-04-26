@@ -16,6 +16,8 @@ namespace winrt::Environ::implementation
                                 Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
         fire_and_forget OnRestoreClick(Windows::Foundation::IInspectable const& sender,
                                        Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnContainerContentChanging(Microsoft::UI::Xaml::Controls::ListViewBase const& sender,
+                                        Microsoft::UI::Xaml::Controls::ContainerContentChangingEventArgs const& args);
 
     private:
         Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable> m_snapshots{
@@ -23,6 +25,7 @@ namespace winrt::Environ::implementation
         };
 
         void LoadSnapshots();
+        void CheckExternalChanges();
     };
 }
 

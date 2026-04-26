@@ -59,6 +59,16 @@ std::wstring EnvChange::describe() const {
     case Kind::Add:
         return std::format(L"Add '{}' = '{}'", name, truncate(value));
     case Kind::Modify:
+        if (!segment_changes.empty()) {
+            std::wstring desc{std::format(L"Modify '{}':", name)};
+            for (auto& sc : segment_changes) {
+                if (sc.kind == PathSegmentChange::Kind::Add)
+                    desc += std::format(L" +'{}'", truncate(sc.segment));
+                else
+                    desc += std::format(L" -'{}'", truncate(sc.segment));
+            }
+            return desc;
+        }
         return std::format(L"Modify '{}' to '{}'", name, truncate(value));
     case Kind::Delete:
         return std::format(L"Delete '{}'", name);
@@ -110,9 +120,18 @@ std::wstring summarize_changes(std::vector<EnvChange> const& changes) {
         }
     }
 
-    // For a single change, include the value
+    // For a single change, include detail
     if (parts.size() == 1) {
         const auto& c{changes[0]};
+        if (c.kind == EnvChange::Kind::Modify && !c.segment_changes.empty()) {
+            // Summarize segment changes: "PATH: +C:\new, -C:\old"
+            std::wstring detail{c.name + L":"};
+            for (auto& sc : c.segment_changes) {
+                detail += (sc.kind == PathSegmentChange::Kind::Add) ? L" +" : L" -";
+                detail += truncate(sc.segment);
+            }
+            return detail;
+        }
         if (c.kind == EnvChange::Kind::Modify) {
             return std::format(L"Modify {} to '{}'", c.name, truncate(c.value));
         }
@@ -186,6 +205,31 @@ std::vector<EnvChange> compute_diff(
                     .value{var.value},
                     .is_expandable{var.is_expandable},
                 });
+
+                // For PathList variables, compute segment-level diff
+                if (orig.kind == EnvVariableKind::PathList && !orig.segments.empty()) {
+                    auto& change{changes.back()};
+
+                    // Match old segments against new; unmatched old = removed, unmatched new = added
+                    std::vector<std::wstring> remaining_old{orig.segments};
+
+                    for (auto& seg : var.segments) {
+                        bool found{false};
+                        for (std::size_t j{0}; j < remaining_old.size(); ++j) {
+                            if (_wcsicmp(remaining_old[j].c_str(), seg.c_str()) == 0) {
+                                remaining_old.erase(remaining_old.begin() + j);
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            change.segment_changes.push_back({PathSegmentChange::Kind::Add, seg});
+                        }
+                    }
+                    for (auto& seg : remaining_old) {
+                        change.segment_changes.push_back({PathSegmentChange::Kind::Remove, seg});
+                    }
+                }
             }
         }
     }
@@ -211,8 +255,6 @@ std::wstring apply_changes(Scope scope, std::vector<EnvChange> const& changes) {
         return std::format(L"Failed to open registry key: error {}", result);
     }
 
-    std::wstring errors;
-
     for (const auto& change : changes) {
         std::wstring err;
         switch (change.kind) {
@@ -224,21 +266,24 @@ std::wstring apply_changes(Scope scope, std::vector<EnvChange> const& changes) {
             err = delete_registry_value(hkey, change.name);
             break;
         case EnvChange::Kind::Rename:
-            err = delete_registry_value(hkey, change.old_name);
+            // Set the new name first so the value is never lost. If the delete
+            // of the old name fails afterward we get a harmless duplicate rather
+            // than data loss.
+            err = set_registry_value(hkey, change.name, change.value, change.is_expandable);
             if (err.empty()) {
-                err = set_registry_value(hkey, change.name, change.value, change.is_expandable);
+                err = delete_registry_value(hkey, change.old_name);
             }
             break;
         }
         if (!err.empty()) {
             spdlog::error("Registry write error: {}", pnq::unicode::to_utf8(err));
-            if (!errors.empty()) errors += L"\n";
-            errors += err;
+            RegCloseKey(hkey);
+            return err;
         }
     }
 
     RegCloseKey(hkey);
-    return errors;
+    return {};
 }
 
 ApplyResult apply_document_changes(

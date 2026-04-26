@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<setup>
+  <!--
+    Environ Bundle Setup
+    L'éditeur des variables d'environnement. For English speakers, mostly.
+  -->
+
+  <!-- Product Information -->
+  <set name="PRODUCT_NAME" value="Environ"/>
+  <set name="MANUFACTURER" value="https://github.com/gersonkurz"/>
+  <set name="PRODUCT_VERSION" value="1.0.0"/>
+  <set name="LANGUAGE" value="en-us"/>
+
+  <!-- Upgrade GUID - MUST remain constant across versions -->
+  <set name="UPGRADE_CODE" value="{850B95A3-CDB8-411D-968C-6BB33E8B59CE}"/>
+
+  <!-- Default install folder (used by bundle UI) -->
+  <set name="INSTALL_FOLDER" value="Environ"/>
+  <set name="INSTALLDIR" value="Environ"/>
+
+  <!-- Build target -->
+  <set name="BUILD_TARGET" value="dist\Environ-{{PRODUCT_VERSION}}"/>
+
+  <!-- Bundle definition with all three architectures -->
+  <bundle source_64bit="Environ-{{PRODUCT_VERSION}}-x64.msi"
+          source_32bit="Environ-{{PRODUCT_VERSION}}-x86.msi"
+          source_arm64="Environ-{{PRODUCT_VERSION}}-arm64.msi"/>
+</setup>

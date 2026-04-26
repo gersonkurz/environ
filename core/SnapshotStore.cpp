@@ -29,7 +29,9 @@ std::filesystem::path database_path() {
     std::filesystem::path dir{appdata};
     CoTaskMemFree(appdata);
     dir /= L"environ";
-    std::filesystem::create_directories(dir);
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) return {};
     return dir / L"environ.db";
 }
 
@@ -285,6 +287,19 @@ std::vector<std::wstring> SnapshotStore::describe_snapshot_changes(int64_t snaps
         prev_map[make_key(v.scope, v.name)] = &v;
     }
 
+    // Split a semicolon-delimited value into segments
+    auto split_segments = [](std::wstring_view val) {
+        std::vector<std::wstring> segs;
+        std::size_t pos{0};
+        while (pos < val.size()) {
+            auto semi{val.find(L';', pos)};
+            if (semi == std::wstring_view::npos) semi = val.size();
+            segs.emplace_back(val.substr(pos, semi - pos));
+            pos = semi + 1;
+        }
+        return segs;
+    };
+
     // Detect adds and modifications
     for (const auto& v : current_vars) {
         auto key{make_key(v.scope, v.name)};
@@ -293,7 +308,41 @@ std::vector<std::wstring> SnapshotStore::describe_snapshot_changes(int64_t snaps
         if (it == prev_map.end()) {
             result.push_back(std::format(L"[{}] Add '{}' = '{}'", scope_str, v.name, v.value));
         } else if (it->second->value != v.value) {
-            result.push_back(std::format(L"[{}] Modify '{}' to '{}'", scope_str, v.name, v.value));
+            // Check if this looks like a path-list variable (contains semicolons)
+            bool is_path_like{v.value.find(L';') != std::wstring::npos ||
+                              it->second->value.find(L';') != std::wstring::npos};
+            if (is_path_like) {
+                auto old_segs{split_segments(it->second->value)};
+                auto new_segs{split_segments(v.value)};
+
+                // Match old vs new segments; unmatched = added/removed
+                std::vector<std::wstring> remaining_old{old_segs};
+                std::vector<std::wstring> added;
+                for (auto& seg : new_segs) {
+                    bool found{false};
+                    for (std::size_t j{0}; j < remaining_old.size(); ++j) {
+                        if (_wcsicmp(remaining_old[j].c_str(), seg.c_str()) == 0) {
+                            remaining_old.erase(remaining_old.begin() + j);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) added.push_back(seg);
+                }
+
+                if (added.empty() && remaining_old.empty()) {
+                    result.push_back(std::format(L"[{}] Modify '{}' (reordered)", scope_str, v.name));
+                } else {
+                    for (auto& seg : added) {
+                        result.push_back(std::format(L"[{}] {} +'{}'", scope_str, v.name, seg));
+                    }
+                    for (auto& seg : remaining_old) {
+                        result.push_back(std::format(L"[{}] {} -'{}'", scope_str, v.name, seg));
+                    }
+                }
+            } else {
+                result.push_back(std::format(L"[{}] Modify '{}' to '{}'", scope_str, v.name, v.value));
+            }
         }
     }
 

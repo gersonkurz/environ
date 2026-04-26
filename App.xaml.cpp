@@ -27,7 +27,9 @@ void init_logging()
     std::filesystem::path dir{appdata};
     CoTaskMemFree(appdata);
     dir /= L"environ";
-    std::filesystem::create_directories(dir);
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) return;
 
     auto log_path{(dir / "environ.log").string()};
     auto logger{spdlog::basic_logger_mt("environ", log_path, true)};
@@ -42,16 +44,18 @@ namespace winrt::Environ::implementation
 {
     App::App()
     {
-#if defined _DEBUG && !defined DISABLE_XAML_GENERATED_BREAK_ON_UNHANDLED_EXCEPTION
         UnhandledException([](IInspectable const&, UnhandledExceptionEventArgs const& e)
         {
+            auto msg{winrt::to_string(e.Message())};
+            spdlog::critical("Unhandled exception: {}", msg);
+            spdlog::default_logger()->flush();
+#if defined _DEBUG
             if (IsDebuggerPresent())
             {
-                auto errorMessage = e.Message();
                 __debugbreak();
             }
-        });
 #endif
+        });
     }
 
     void App::OnLaunched([[maybe_unused]] LaunchActivatedEventArgs const& e)
@@ -61,6 +65,9 @@ namespace winrt::Environ::implementation
         ::Environ::core::snapshot_store().open();
 
         window = make<MainWindow>();
+        window.Closed([this](auto&&, auto&&) {
+            window = nullptr;
+        });
         window.Activate();
     }
 }

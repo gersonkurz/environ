@@ -4,6 +4,13 @@
 #include "AboutPage.g.cpp"
 #endif
 
+#include "Version.h"
+
 namespace winrt::Environ::implementation
 {
+    AboutPage::AboutPage()
+    {
+        InitializeComponent();
+        VersionText().Text(L"Version " ENVIRON_VERSION_WSTRING);
+    }
 }

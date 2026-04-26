@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<setup>
+  <!--
+    Environ x64 Setup
+    L'éditeur des variables d'environnement. For English speakers, mostly.
+  -->
+
+  <!-- Product Information -->
+  <set name="PRODUCT_NAME" value="Environ"/>
+  <set name="MANUFACTURER" value="https://github.com/gersonkurz"/>
+  <set name="PRODUCT_VERSION" value="1.0.0"/>
+  <set name="PLATFORM" value="x64"/>
+  <set name="LANGUAGE" value="en-us"/>
+
+  <!-- Upgrade GUID - MUST remain constant across versions -->
+  <set name="UPGRADE_CODE" value="{D8497BBE-86D3-4F11-B208-F2C649E785B6}"/>
+  <set name="INSTALL_DIR_DIALOG" value="true"/>
+  <set name="INSTALL_FOLDER" value="Environ"/>
+  <set name="BUILD_TARGET" value="dist\Environ-{{PRODUCT_VERSION}}-x64.msi"/>
+  <feature name="Complete">
+    <files source="..\x64\Release\Environ" target="INSTALLDIR"/>
+  </feature>
+
+</setup>

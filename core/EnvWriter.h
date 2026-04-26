@@ -7,6 +7,12 @@
 
 namespace Environ::core {
 
+struct PathSegmentChange {
+    enum class Kind { Add, Remove };
+    Kind kind;
+    std::wstring segment;
+};
+
 struct EnvChange {
     enum class Kind { Add, Modify, Delete, Rename };
     Kind kind;
@@ -14,6 +20,9 @@ struct EnvChange {
     std::wstring old_name;     // only meaningful for Rename
     std::wstring value;
     bool is_expandable{false};
+
+    // For PathList modifications: individual segment adds/removes
+    std::vector<PathSegmentChange> segment_changes;
 
     // Human-readable description for dry-run display
     std::wstring describe() const;

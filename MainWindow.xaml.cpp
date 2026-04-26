@@ -9,6 +9,7 @@
 #include "SettingsPage.xaml.h"
 #include "AboutPage.xaml.h"
 #include "AppSettings.h"
+#include "Version.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -22,6 +23,9 @@ namespace winrt::Environ::implementation
 
     void MainWindow::ConfigureTitleBar()
     {
+        AppWindow().SetIcon(L"Assets/environ.ico");
+        Title(ENVIRON_APP_TITLE);
+        TitleText().Text(ENVIRON_APP_TITLE);
         ExtendsContentIntoTitleBar(true);
         SetTitleBar(AppTitleBar());
 
@@ -110,8 +114,11 @@ namespace winrt::Environ::implementation
 
         // Re-sync caption button colors whenever the effective theme changes
         if (auto root{Content().try_as<FrameworkElement>()}) {
-            root.ActualThemeChanged([this](FrameworkElement const&, IInspectable const&) {
-                UpdateCaptionButtonColors();
+            m_rootElement = root;
+            m_themeChangedToken = root.ActualThemeChanged([this](FrameworkElement const&, IInspectable const&) {
+                if (!m_closing) {
+                    UpdateCaptionButtonColors();
+                }
             });
         }
 
@@ -120,6 +127,11 @@ namespace winrt::Environ::implementation
         // Save window placement on close; intercept if unsaved changes
         this->Closed([this](auto&&, Microsoft::UI::Xaml::WindowEventArgs const& args) {
             if (m_closing) {
+                // Revoke the theme-changed handler to prevent callbacks during teardown
+                if (m_rootElement) {
+                    m_rootElement.ActualThemeChanged(m_themeChangedToken);
+                    m_rootElement = nullptr;
+                }
                 SaveWindowPlacement();
                 return;
             }
@@ -127,6 +139,11 @@ namespace winrt::Environ::implementation
                 args.Handled(true);
                 ShowUnsavedChangesDialog();
             } else {
+                // Revoke the theme-changed handler to prevent callbacks during teardown
+                if (m_rootElement) {
+                    m_rootElement.ActualThemeChanged(m_themeChangedToken);
+                    m_rootElement = nullptr;
+                }
                 SaveWindowPlacement();
             }
         });

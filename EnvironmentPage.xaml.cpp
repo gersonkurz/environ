@@ -610,14 +610,10 @@ namespace winrt::Environ::implementation
                 card.Children().Append(topRow);
 
                 // Value preview for Add/Modify
-                if (c.kind == ::Environ::core::EnvChange::Kind::Add ||
-                    c.kind == ::Environ::core::EnvChange::Kind::Modify) {
+                if (c.kind == ::Environ::core::EnvChange::Kind::Add) {
                     auto preview{c.value};
                     if (preview.size() > 80) {
                         preview = preview.substr(0, 77) + L"...";
-                    }
-                    if (c.kind == ::Environ::core::EnvChange::Kind::Modify) {
-                        preview = L"(value changed)";
                     }
 
                     TextBlock valueBlock;
@@ -627,6 +623,47 @@ namespace winrt::Environ::implementation
                     valueBlock.TextTrimming(TextTrimming::CharacterEllipsis);
                     valueBlock.Margin({28, 0, 0, 0});
                     card.Children().Append(valueBlock);
+                }
+                else if (c.kind == ::Environ::core::EnvChange::Kind::Modify) {
+                    if (!c.segment_changes.empty()) {
+                        // Show individual path segment adds/removes
+                        for (auto& sc : c.segment_changes) {
+                            bool is_add{sc.kind == ::Environ::core::PathSegmentChange::Kind::Add};
+
+                            auto segRow{StackPanel()};
+                            segRow.Orientation(Orientation::Horizontal);
+                            segRow.Spacing(6);
+                            segRow.Margin({28, 1, 0, 1});
+
+                            FontIcon segIcon;
+                            segIcon.FontSize(11);
+                            segIcon.Glyph(is_add ? L"\uE710" : L"\uE738");
+                            auto segColor{is_add
+                                ? Windows::UI::Color{0xFF, 0x0F, 0x7B, 0x0F}
+                                : Windows::UI::Color{0xFF, 0xC4, 0x2B, 0x1C}};
+                            segIcon.Foreground(Microsoft::UI::Xaml::Media::SolidColorBrush{segColor});
+                            segIcon.VerticalAlignment(VerticalAlignment::Center);
+                            segRow.Children().Append(segIcon);
+
+                            TextBlock segText;
+                            segText.Text(hstring{sc.segment});
+                            segText.FontSize(12);
+                            segText.Opacity(0.8);
+                            segText.TextTrimming(TextTrimming::CharacterEllipsis);
+                            segText.VerticalAlignment(VerticalAlignment::Center);
+                            segRow.Children().Append(segText);
+
+                            card.Children().Append(segRow);
+                        }
+                    } else {
+                        // Non-path variable or pure reorder
+                        TextBlock valueBlock;
+                        valueBlock.Text(L"(value changed)");
+                        valueBlock.FontSize(12);
+                        valueBlock.Opacity(0.6);
+                        valueBlock.Margin({28, 0, 0, 0});
+                        card.Children().Append(valueBlock);
+                    }
                 }
 
                 panel.Children().Append(card);

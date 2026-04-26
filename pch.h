@@ -33,3 +33,4 @@
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.h>
 #include <microsoft.ui.xaml.window.h>
+#include <winrt/Windows.ApplicationModel.DataTransfer.h>

@@ -5,6 +5,7 @@ Generated Files/
 Release/
 x64/
 packages/
+setup/dist
 
 # Visual Studio
 .vs/

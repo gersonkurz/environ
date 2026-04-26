@@ -6,7 +6,7 @@ namespace winrt::Environ::implementation
 {
     struct AboutPage : AboutPageT<AboutPage>
     {
-        AboutPage() = default;
+        AboutPage();
     };
 }
 

@@ -27,6 +27,9 @@ namespace winrt::Environ::implementation
         Environ::SettingsPage m_settingsPage{nullptr};
         Environ::AboutPage m_aboutPage{nullptr};
         bool m_closing{false};
+
+        Microsoft::UI::Xaml::FrameworkElement m_rootElement{nullptr};
+        winrt::event_token m_themeChangedToken{};
     };
 }
 

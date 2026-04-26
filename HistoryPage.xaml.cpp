@@ -32,6 +32,7 @@ namespace winrt::Environ::implementation
         [[maybe_unused]] RoutedEventArgs const& args)
     {
         LoadSnapshots();
+        CheckExternalChanges();
     }
 
     void HistoryPage::LoadSnapshots()
@@ -70,6 +71,49 @@ namespace winrt::Environ::implementation
         }
     }
 
+    void HistoryPage::OnContainerContentChanging(
+        [[maybe_unused]] ListViewBase const& sender,
+        ContainerContentChangingEventArgs const& args)
+    {
+        if (args.InRecycleQueue()) return;
+
+        auto container{args.ItemContainer()};
+
+        Controls::MenuFlyout flyout;
+        flyout.Opening([this](IInspectable const& s, IInspectable const&)
+        {
+            auto flyout{s.as<Controls::MenuFlyout>()};
+            flyout.Items().Clear();
+
+            auto lvi{flyout.Target().as<ListViewItem>()};
+            auto vm{lvi.Content().try_as<Environ::HistoryEntryViewModel>()};
+            if (!vm) return;
+
+            Controls::MenuFlyoutItem copyItem;
+            copyItem.Text(L"Copy to Clipboard");
+            FontIcon icon;
+            icon.Glyph(L"\uE8C8"); // Copy
+            copyItem.Icon(icon);
+            copyItem.Click([vm](auto&&, auto&&) {
+                std::wstring text;
+                text += std::wstring{vm.Timestamp()};
+                text += L"  [" + std::wstring{vm.ScopeBadge()} + L"]";
+                text += L"  " + std::wstring{vm.Label()} + L"\n";
+                auto changes{std::wstring{vm.Changes()}};
+                if (!changes.empty()) {
+                    text += changes;
+                }
+
+                Windows::ApplicationModel::DataTransfer::DataPackage data;
+                data.SetText(hstring{text});
+                Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(data);
+            });
+            flyout.Items().Append(copyItem);
+        });
+
+        container.ContextFlyout(flyout);
+    }
+
     void HistoryPage::OnSnapshotSelected(
         [[maybe_unused]] IInspectable const& sender,
         [[maybe_unused]] SelectionChangedEventArgs const& args)
@@ -77,6 +121,80 @@ namespace winrt::Environ::implementation
         // Enable Restore button when a snapshot is selected
         bool has_selection{args.AddedItems().Size() > 0};
         RestoreButton().IsEnabled(has_selection);
+    }
+
+    void HistoryPage::CheckExternalChanges()
+    {
+        auto snapshots{::Environ::core::snapshot_store().list_snapshots()};
+        if (snapshots.empty()) {
+            ExternalChangesBar().IsOpen(false);
+            return;
+        }
+
+        // Load the most recent snapshot
+        auto snap_vars{::Environ::core::snapshot_store().load_snapshot(snapshots[0].id)};
+        if (snap_vars.empty()) {
+            ExternalChangesBar().IsOpen(false);
+            return;
+        }
+
+        // Convert SnapshotVariable -> EnvVariable, split by scope
+        std::vector<::Environ::core::EnvVariable> snap_user;
+        std::vector<::Environ::core::EnvVariable> snap_machine;
+
+        for (auto& sv : snap_vars) {
+            ::Environ::core::EnvVariable var;
+            var.name = sv.name;
+            var.value = sv.value;
+            var.is_expandable = sv.is_expandable;
+
+            if (sv.value.find(L';') != std::wstring::npos) {
+                var.kind = ::Environ::core::EnvVariableKind::PathList;
+                std::wstring_view view{sv.value};
+                size_t pos{0};
+                while (pos < view.size()) {
+                    auto semi{view.find(L';', pos)};
+                    if (semi == std::wstring_view::npos) semi = view.size();
+                    var.segments.emplace_back(view.substr(pos, semi - pos));
+                    pos = semi + 1;
+                }
+            } else {
+                var.kind = ::Environ::core::EnvVariableKind::Scalar;
+            }
+
+            if (sv.scope == ::Environ::core::Scope::User) {
+                snap_user.push_back(std::move(var));
+            } else {
+                snap_machine.push_back(std::move(var));
+            }
+        }
+
+        // Read live registry state
+        auto current_user{::Environ::core::read_variables(::Environ::core::Scope::User)};
+        auto current_machine{::Environ::core::read_variables(::Environ::core::Scope::Machine)};
+
+        // Compute diffs: snapshot is "original", live is "current"
+        auto user_changes{::Environ::core::compute_diff(snap_user, current_user)};
+        auto machine_changes{::Environ::core::compute_diff(snap_machine, current_machine)};
+
+        if (user_changes.empty() && machine_changes.empty()) {
+            ExternalChangesBar().IsOpen(false);
+            return;
+        }
+
+        // Format the change summary
+        std::wstring summary;
+        for (auto& c : user_changes) {
+            if (!summary.empty()) summary += L"\n";
+            summary += L"[User] " + c.describe();
+        }
+        for (auto& c : machine_changes) {
+            if (!summary.empty()) summary += L"\n";
+            summary += L"[Machine] " + c.describe();
+        }
+
+        ExternalChangesBar().Message(hstring{summary});
+        ExternalChangesBar().IsOpen(true);
     }
 
     fire_and_forget HistoryPage::OnRestoreClick(
