@@ -203,6 +203,12 @@ std::vector<EnvChange> compute_diff(
 }
 
 std::wstring apply_changes(Scope scope, std::vector<EnvChange> const& changes) {
+    // Defensive: never touch HKLM unelevated, even if called directly (not via
+    // apply_document_changes, which also checks).
+    if (scope == Scope::Machine && !is_elevated()) {
+        return L"Machine (HKLM) changes require administrator elevation.";
+    }
+
     HKEY hkey{nullptr};
     auto result{RegOpenKeyExW(root_key(scope), registry_path_w(scope),
                               0, KEY_SET_VALUE, &hkey)};

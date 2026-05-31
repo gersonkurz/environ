@@ -40,6 +40,10 @@ void expand_and_validate(std::vector<EnvVariable>& variables);
 void detect_duplicates(std::vector<EnvVariable>& user_vars,
                        std::vector<EnvVariable>& machine_vars);
 
+// Join path-list segments back into a single ';'-separated value — the inverse of the
+// segment split performed by read_variables. Kept here so split and join stay symmetric.
+std::wstring join_segments(std::vector<std::wstring> const& segments);
+
 // Returns true if the current process is running elevated (admin).
 bool is_elevated();
 

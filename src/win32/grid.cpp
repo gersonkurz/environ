@@ -31,27 +31,34 @@ namespace ui
     {
         using Environ::core::EnvVariable;
         using Environ::core::EnvVariableKind;
+        using Environ::core::Scope;
 
+        m_userOrig = userVars;
+        m_machineOrig = machineVars;
         m_rows.clear();
         m_scrollY = 0.0f;
         m_hover = -1;
         m_selected = -1;
         m_editing = -1;
 
-        const auto addGroup = [&](const std::vector<EnvVariable>& vars, bool readOnly) {
-            for (const auto& v : vars)
+        const auto addGroup = [&](const std::vector<EnvVariable>& vars, Scope scope, bool readOnly) {
+            for (int vi{0}; vi < static_cast<int>(vars.size()); ++vi)
             {
+                const EnvVariable& v{vars[static_cast<size_t>(vi)]};
                 Row var{};
                 var.kind = Row::Kind::Variable;
                 var.col1 = v.name;
                 var.depth = 0;
                 var.readOnly = readOnly;
+                var.scope = scope;
+                var.varIndex = vi;
 
                 if (v.kind == EnvVariableKind::PathList && !v.segments.empty())
                 {
                     // First folder sits on the variable row; the rest stack beneath it.
                     var.col2 = v.segments[0];
                     var.original = var.col2;
+                    var.segIndex = 0;
                     var.invalid = !v.segment_valid.empty() && !v.segment_valid[0];
                     var.duplicate = !v.segment_duplicate.empty() && !v.segment_duplicate[0].empty();
                     m_rows.push_back(std::move(var));
@@ -63,6 +70,9 @@ namespace ui
                         seg.original = seg.col2;
                         seg.depth = 1;
                         seg.readOnly = readOnly;
+                        seg.scope = scope;
+                        seg.varIndex = vi;
+                        seg.segIndex = static_cast<int>(i);
                         seg.invalid = (i < v.segment_valid.size()) && !v.segment_valid[i];
                         seg.duplicate = (i < v.segment_duplicate.size()) && !v.segment_duplicate[i].empty();
                         m_rows.push_back(std::move(seg));
@@ -72,13 +82,62 @@ namespace ui
                 {
                     var.col2 = v.value;
                     var.original = var.col2;
+                    var.segIndex = -1;
                     m_rows.push_back(std::move(var));
                 }
             }
         };
 
-        addGroup(userVars, false);
-        addGroup(machineVars, !elevated);
+        addGroup(userVars, Scope::User, false);
+        addGroup(machineVars, Scope::Machine, !elevated);
+    }
+
+    bool Grid::HasChanges() const
+    {
+        for (const Row& r : m_rows)
+            if (r.col2 != r.original) return true;
+        return false;
+    }
+
+    const std::vector<Environ::core::EnvVariable>& Grid::OriginalVars(Environ::core::Scope scope) const
+    {
+        return (scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig;
+    }
+
+    std::vector<Environ::core::EnvVariable> Grid::CurrentVars(Environ::core::Scope scope) const
+    {
+        using Environ::core::EnvVariable;
+        using Environ::core::EnvVariableKind;
+        std::vector<EnvVariable> result{(scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig};
+        std::vector<bool> rejoin(result.size(), false); // parens: brace-init would pick the initializer_list ctor
+
+        for (const Row& r : m_rows)
+        {
+            if (r.scope != scope || r.col2 == r.original) continue; // only edited rows of this scope
+            if (r.varIndex < 0 || r.varIndex >= static_cast<int>(result.size())) continue;
+            EnvVariable& v{result[static_cast<size_t>(r.varIndex)]};
+            if (v.kind == EnvVariableKind::PathList && r.segIndex >= 0
+                && r.segIndex < static_cast<int>(v.segments.size()))
+            {
+                v.segments[static_cast<size_t>(r.segIndex)] = r.col2;
+                rejoin[static_cast<size_t>(r.varIndex)] = true;
+            }
+            else
+            {
+                v.value = r.col2; // scalar
+            }
+        }
+
+        // Rejoin only the path-lists we actually edited, so untouched ones keep their exact
+        // original value (avoids spurious normalization diffs). join_segments lives in core,
+        // mirroring its split, so the two stay symmetric.
+        // TODO(review): the core split drops empty/trailing entries, so editing a path-list
+        // that contains them re-serializes without them (normalization the user didn't ask
+        // for). Preserve original separator structure in 3B write-hardening before relying on
+        // this for path-lists with empty entries.
+        for (size_t i{0}; i < result.size(); ++i)
+            if (rejoin[i]) result[i].value = Environ::core::join_segments(result[i].segments);
+        return result;
     }
 
     Grid::Layout Grid::Compute() const

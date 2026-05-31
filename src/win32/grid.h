@@ -57,6 +57,12 @@ namespace ui
         bool SelectNextEditable(int dir);                  // Tab: move to next/prev editable row
         void CommitEdit(const std::wstring& text);         // write back + mark dirty
         void CancelEdit();
+
+        // Save support: the originals as loaded, and the current (edited) state rebuilt
+        // from the rows. Used by the host with core EnvWriter.
+        bool HasChanges() const;
+        const std::vector<Environ::core::EnvVariable>& OriginalVars(Environ::core::Scope scope) const;
+        std::vector<Environ::core::EnvVariable> CurrentVars(Environ::core::Scope scope) const;
         bool IsEditing() const { return m_editing >= 0; }
 
     private:
@@ -70,6 +76,10 @@ namespace ui
             bool readOnly;              // machine var, unelevated
             bool invalid;               // segment path missing
             bool duplicate;             // segment duplicated elsewhere
+            // Back-references into the originals for save reconstruction:
+            Environ::core::Scope scope; // which scope this row belongs to
+            int varIndex;               // index into that scope's original vector
+            int segIndex;               // path-list segment index (-1 for a scalar value)
         };
 
         struct Layout
@@ -91,6 +101,8 @@ namespace ui
         void ClampScroll();
 
         std::vector<Row> m_rows;
+        std::vector<Environ::core::EnvVariable> m_userOrig;
+        std::vector<Environ::core::EnvVariable> m_machineOrig;
         D2D1_RECT_F m_bounds{};
         float m_rowH{30.0f};
         float m_headerH{32.0f};

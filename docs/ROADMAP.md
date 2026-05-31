@@ -51,10 +51,11 @@ Gate: builds clean at `/W4 /WX`, zero warnings.
   (TOML-driven, dark/light/blue, live swap).
 - **Phase 1 — Read-only spine (done).** Custom title bar + virtualized themed grid
   wired to `EnvStore`, showing real user/machine vars. No editing. See `docs/PHASE-1.md`.
-- **Phase 2 — Inline editing (current).** Skinned `EDIT` cell editor, dirty tracking,
+- **Phase 2 — Inline editing (done).** Skinned `EDIT` cell editor, dirty tracking,
   per-segment path editing. No registry write yet. See `docs/PHASE-2.md`.
-- **Phase 3 — Apply / save.** `EnvWriter` apply path, dry-run review, conflict detection,
-  `WM_SETTINGCHANGE` broadcast.
+- **Phase 3 — Apply / save (current).** `EnvWriter` apply path, dry-run review,
+  `WM_SETTINGCHANGE` broadcast (3A); themed review panel + conflict detection (3B).
+  See `docs/PHASE-3.md`.
 - **Phase 4 — Snapshots & history.** `SnapshotStore` wiring, history view, restore, diff.
 - **Phase 5 — Settings & theming UI.** In-app theme switch, custom schemes, window
   placement persistence, and a **typography section in the theme table** (font

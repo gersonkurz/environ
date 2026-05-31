@@ -238,6 +238,17 @@ void detect_duplicates(std::vector<EnvVariable>& user_vars,
     }
 }
 
+std::wstring join_segments(std::vector<std::wstring> const& segments) {
+    std::wstring result;
+    for (std::size_t i{0}; i < segments.size(); ++i) {
+        if (i != 0) {
+            result.push_back(L';');
+        }
+        result += segments[i];
+    }
+    return result;
+}
+
 bool is_elevated() {
     BOOL elevated{FALSE};
     HANDLE token{nullptr};

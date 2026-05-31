@@ -19,6 +19,7 @@
 #include "theme.h"
 #include "grid.h"
 #include "EnvStore.h"
+#include "EnvWriter.h"
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
@@ -213,7 +214,7 @@ namespace
                      D2D1::RectF(pad, kCaptionH + 8.0f, sz.width - pad, sz.height - 34.0f));
 
         const std::wstring footer = std::format(
-            L"{}   \x2022   {} user, {} machine{}   \x2022   F1 dark  F2 light  F3 blue",
+            L"{}   \x2022   {} user, {} machine{}   \x2022   Ctrl+S apply   \x2022   F1 dark  F2 light  F3 blue",
             std::wstring(s.name.begin(), s.name.end()), g_userCount, g_machineCount,
             g_elevated ? L"" : L"  (machine read-only)");
         DrawString(footer, g_fmtSub,
@@ -365,6 +366,59 @@ namespace
         if (target) PositionEditor(hwnd, *target);
     }
 
+    void LoadData(); // defined below; re-reads the registry into the grid
+
+    // Phase 3: preview the pending edits, apply on confirm (HKCU always; HKLM only when
+    // elevated — handled by the core), then reload so the grid shows the saved state.
+    void SaveChanges(HWND hwnd)
+    {
+        using namespace Environ::core;
+        if (g_grid.IsEditing()) EndEdit(hwnd, true);
+        if (!g_grid.HasChanges())
+        {
+            MessageBoxW(hwnd, L"No changes to apply.", L"environ", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        const std::vector<EnvVariable> curUser{g_grid.CurrentVars(Scope::User)};
+        const std::vector<EnvVariable> curMachine{g_grid.CurrentVars(Scope::Machine)};
+
+        const std::vector<EnvChange> userChanges{compute_diff(g_grid.OriginalVars(Scope::User), curUser)};
+        const std::vector<EnvChange> machineChanges{compute_diff(g_grid.OriginalVars(Scope::Machine), curMachine)};
+        if (userChanges.empty() && machineChanges.empty())
+        {
+            // Edits exist per-row but net to the original values (e.g. edited back).
+            MessageBoxW(hwnd, L"No effective changes to apply.", L"environ", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        // Scope-prefixed so same-named variables (e.g. Path in both HKCU and HKLM) are unambiguous.
+        std::wstring preview{L"Apply these changes?\n\n"};
+        for (const EnvChange& c : userChanges)    { preview += L"[User] ";    preview += c.describe(); preview += L'\n'; }
+        for (const EnvChange& c : machineChanges) { preview += L"[Machine] "; preview += c.describe(); preview += L'\n'; }
+        if (MessageBoxW(hwnd, preview.c_str(), L"environ \x2014 Apply changes",
+                        MB_OKCANCEL | MB_ICONQUESTION) != IDOK)
+            return;
+
+        const ApplyResult result{apply_document_changes(
+            g_grid.OriginalVars(Scope::User), curUser,
+            g_grid.OriginalVars(Scope::Machine), curMachine, g_elevated)};
+
+        if (result.succeeded())
+        {
+            LoadData(); // re-read the registry: fresh originals, dirty cleared
+        }
+        else
+        {
+            // Keep the in-memory edits on failure so the user can correct and retry.
+            std::wstring err{L"Some changes could not be applied; your edits are kept so you can retry.\n\n"};
+            if (!result.user.error.empty()) err += L"User: " + result.user.error + L'\n';
+            if (!result.machine.error.empty()) err += L"Machine: " + result.machine.error + L'\n';
+            MessageBoxW(hwnd, err.c_str(), L"environ \x2014 Apply failed", MB_OK | MB_ICONERROR);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
     LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
         switch (msg)
@@ -414,6 +468,7 @@ namespace
         }
         case WM_KEYDOWN:
         {
+            if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(hwnd); return 0; }
             if (wp == VK_RETURN) { BeginEditFromGrid(hwnd); return 0; }
             const char* want{nullptr};
             if (wp == VK_F1) want = "dark";

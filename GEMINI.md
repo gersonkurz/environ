@@ -44,8 +44,8 @@ The project uses a custom PowerShell build script that self-bootstraps the Visua
 ## Key Documentation
 - `CLAUDE.md`: Critical technical constraints and "READ THIS FIRST" direction.
 - `AGENTS.md`: Strict reviewer checklist and code quality mandates.
-- `docs/ROADMAP.md`: Project phases (Current: Phase 1/2).
-- `docs/PHASE-1.md`: Scope and details of the initial read-only spine.
+- `docs/ROADMAP.md`: Project phases (Current: Phase 3 — apply/save).
+- `docs/PHASE-*.md`: Per-phase scope (PHASE-1 read-only spine, PHASE-2 editing, PHASE-3 apply/save).
 
 ## Implementation Guidelines
 - **Elevation:** App starts unelevated. `HKLM` is read-only until a "Restart as Administrator" relaunch (Phase 6). Always check elevation before attempting machine-level writes.
