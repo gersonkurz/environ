@@ -30,6 +30,11 @@
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- Self-contained unpackaged deployment: makes the build harvest every activatable
+         class from the WinMDs into the reg-free WinRT fusion manifest and stage the runtime
+         DLLs next to the exe. Without this the manifest is emitted empty and Microsoft.UI.Xaml
+         type activation fails at startup with STATUS_STOWED_EXCEPTION (0xC000027B). -->
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <ResolveNuGetPackages>false</ResolveNuGetPackages>
     <WindowsAppSdkAutoInitialize>false</WindowsAppSdkAutoInitialize>
   </PropertyGroup>

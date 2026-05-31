@@ -1,0 +1,304 @@
+#include "grid.h"
+
+#include <algorithm>
+#include <string>
+
+namespace ui
+{
+    namespace
+    {
+        constexpr float kPad{12.0f};
+
+        bool Contains(const D2D1_RECT_F& r, float x, float y)
+        {
+            return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+        }
+
+        void DrawString(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+                      const std::wstring& s, IDWriteTextFormat* fmt,
+                      const D2D1_RECT_F& box, const D2D1_COLOR_F& color)
+        {
+            if (s.empty()) return;
+            brush->SetColor(color);
+            rt->DrawTextW(s.c_str(), static_cast<UINT32>(s.size()), fmt, box, brush,
+                          D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+    }
+
+    void Grid::SetData(const std::vector<Environ::core::EnvVariable>& userVars,
+                       const std::vector<Environ::core::EnvVariable>& machineVars,
+                       bool elevated)
+    {
+        using Environ::core::EnvVariable;
+        using Environ::core::EnvVariableKind;
+
+        m_rows.clear();
+        m_scrollY = 0.0f;
+        m_hover = -1;
+        m_selected = -1;
+
+        const auto addGroup = [&](const std::vector<EnvVariable>& vars, bool readOnly) {
+            for (const auto& v : vars)
+            {
+                Row var{};
+                var.kind = Row::Kind::Variable;
+                var.col1 = v.name;
+                var.depth = 0;
+                var.readOnly = readOnly;
+
+                if (v.kind == EnvVariableKind::PathList && !v.segments.empty())
+                {
+                    // First folder sits on the variable row; the rest stack beneath it.
+                    var.col2 = v.segments[0];
+                    var.invalid = !v.segment_valid.empty() && !v.segment_valid[0];
+                    var.duplicate = !v.segment_duplicate.empty() && !v.segment_duplicate[0].empty();
+                    m_rows.push_back(std::move(var));
+                    for (size_t i{1}; i < v.segments.size(); ++i)
+                    {
+                        Row seg{};
+                        seg.kind = Row::Kind::Segment;
+                        seg.col2 = v.segments[i];
+                        seg.depth = 1;
+                        seg.readOnly = readOnly;
+                        seg.invalid = (i < v.segment_valid.size()) && !v.segment_valid[i];
+                        seg.duplicate = (i < v.segment_duplicate.size()) && !v.segment_duplicate[i].empty();
+                        m_rows.push_back(std::move(seg));
+                    }
+                }
+                else
+                {
+                    var.col2 = v.value;
+                    m_rows.push_back(std::move(var));
+                }
+            }
+        };
+
+        addGroup(userVars, false);
+        addGroup(machineVars, !elevated);
+    }
+
+    Grid::Layout Grid::Compute() const
+    {
+        Layout lay{};
+        lay.header = D2D1::RectF(m_bounds.left, m_bounds.top, m_bounds.right, m_bounds.top + m_headerH);
+        lay.data = D2D1::RectF(m_bounds.left, m_bounds.top + m_headerH, m_bounds.right, m_bounds.bottom);
+        lay.viewH = std::max(0.0f, lay.data.bottom - lay.data.top);
+        lay.contentH = static_cast<float>(m_rows.size()) * m_rowH;
+        lay.maxScroll = std::max(0.0f, lay.contentH - lay.viewH);
+        lay.hasScrollbar = lay.contentH > lay.viewH + 0.5f;
+
+        if (lay.hasScrollbar)
+        {
+            const float thumbH = std::max(28.0f, lay.viewH * (lay.viewH / lay.contentH));
+            const float frac = (lay.maxScroll > 0.0f) ? (m_scrollY / lay.maxScroll) : 0.0f;
+            const float thumbTop = lay.data.top + frac * (lay.viewH - thumbH);
+            lay.thumb = D2D1::RectF(lay.data.right - m_scrollbarW + 2.0f, thumbTop,
+                                    lay.data.right - 2.0f, thumbTop + thumbH);
+        }
+        return lay;
+    }
+
+    int Grid::RowAtPoint(const Layout& lay, float x, float y) const
+    {
+        const float rightEdge = lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f);
+        if (x < lay.data.left || x >= rightEdge || y < lay.data.top || y >= lay.data.bottom)
+            return -1;
+        const int idx = static_cast<int>((y - lay.data.top + m_scrollY) / m_rowH);
+        return (idx >= 0 && idx < static_cast<int>(m_rows.size())) ? idx : -1;
+    }
+
+    void Grid::ClampScroll()
+    {
+        const Layout lay = Compute();
+        m_scrollY = std::clamp(m_scrollY, 0.0f, lay.maxScroll);
+    }
+
+    void Grid::EnsureVisible(int row)
+    {
+        const float viewH = m_bounds.bottom - m_bounds.top - m_headerH;
+        if (viewH <= 0.0f) return;
+        const float top = static_cast<float>(row) * m_rowH;
+        const float bottom = top + m_rowH;
+        if (top < m_scrollY) m_scrollY = top;
+        else if (bottom > m_scrollY + viewH) m_scrollY = bottom - viewH;
+        ClampScroll();
+    }
+
+    void Grid::Paint(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+                     const GridFonts& fonts, const theme::ColorScheme& s,
+                     const D2D1_RECT_F& bounds)
+    {
+        m_bounds = bounds;
+        ClampScroll();
+        const Layout lay = Compute();
+
+        const float nameCol = std::min(260.0f, (bounds.right - bounds.left) * 0.34f);
+
+        // Column header band.
+        brush->SetColor(s.header.fill);
+        rt->FillRectangle(lay.header, brush);
+        DrawString(rt, brush, L"NAME", fonts.header,
+                 D2D1::RectF(lay.header.left + kPad, lay.header.top, lay.header.left + nameCol, lay.header.bottom),
+                 s.header.text);
+        DrawString(rt, brush, L"VALUE", fonts.header,
+                 D2D1::RectF(lay.header.left + kPad + nameCol, lay.header.top, lay.header.right, lay.header.bottom),
+                 s.header.text);
+        if (s.header.borderWidth > 0.0f)
+        {
+            brush->SetColor(s.header.border);
+            rt->DrawLine(D2D1::Point2F(lay.header.left, lay.header.bottom - 0.5f),
+                         D2D1::Point2F(lay.header.right, lay.header.bottom - 0.5f),
+                         brush, s.header.borderWidth);
+        }
+
+        rt->PushAxisAlignedClip(lay.data, D2D1_ANTIALIAS_MODE_ALIASED);
+
+        const float rightEdge = lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f);
+        int i = static_cast<int>(m_scrollY / m_rowH);
+        float y = lay.data.top - (m_scrollY - static_cast<float>(i) * m_rowH);
+        for (; i < static_cast<int>(m_rows.size()) && y < lay.data.bottom; ++i, y += m_rowH)
+        {
+            const Row& r = m_rows[static_cast<size_t>(i)];
+            const bool selected = (i == m_selected);
+            const bool hovered = (i == m_hover && !selected);
+            const D2D1_RECT_F rowRect = D2D1::RectF(lay.data.left, y, rightEdge, y + m_rowH);
+
+            // Fill (selection / hover win; then per-segment state; then base row).
+            D2D1_COLOR_F fill = s.row.fill;
+            if (selected)        fill = s.rowSelected.fill;
+            else if (hovered)    fill = s.rowHover.fill;
+            else if (r.invalid)  fill = s.rowInvalid.fill;
+            else if (r.duplicate)fill = s.rowDuplicate.fill;
+            brush->SetColor(fill);
+            rt->FillRectangle(rowRect, brush);
+
+            if (!selected && !hovered && r.invalid && s.rowInvalid.borderWidth > 0.0f)
+            {
+                brush->SetColor(s.rowInvalid.border);
+                rt->DrawRectangle(D2D1::RectF(rowRect.left + 0.5f, rowRect.top + 0.5f,
+                                              rowRect.right - 0.5f, rowRect.bottom - 0.5f),
+                                  brush, s.rowInvalid.borderWidth);
+            }
+
+            // The name column never takes a path-state color (the name isn't a path).
+            D2D1_COLOR_F nameColor = s.row.text;
+            if (selected)        nameColor = s.rowSelected.text;
+            else if (r.readOnly) nameColor = s.readonlyText;
+            else if (hovered)    nameColor = s.rowHover.text;
+
+            // The value column reflects the (first) path segment's state.
+            D2D1_COLOR_F valueColor = s.row.text;
+            if (selected)         valueColor = s.rowSelected.text;
+            else if (r.invalid)   valueColor = s.rowInvalid.text;
+            else if (r.duplicate) valueColor = s.rowDuplicate.text;
+            else if (r.readOnly)  valueColor = s.readonlyText;
+            else if (hovered)     valueColor = s.rowHover.text;
+
+            if (selected)
+            {
+                brush->SetColor(s.accent);
+                rt->FillRectangle(D2D1::RectF(rowRect.left, y + 6.0f, rowRect.left + 3.0f, y + m_rowH - 6.0f), brush);
+            }
+
+            if (r.kind == Row::Kind::Variable)
+            {
+                DrawString(rt, brush, r.col1, fonts.name,
+                         D2D1::RectF(rowRect.left + kPad, y, rowRect.left + nameCol, y + m_rowH), nameColor);
+                DrawString(rt, brush, r.col2, fonts.value,
+                         D2D1::RectF(rowRect.left + kPad + nameCol, y, rowRect.right - kPad, y + m_rowH),
+                         valueColor);
+            }
+            else
+            {
+                // Path segments align under the VALUE column — the variable's contents
+                // laid out across multiple lines, not indented from the name.
+                DrawString(rt, brush, r.col2, fonts.value,
+                         D2D1::RectF(rowRect.left + kPad + nameCol, y, rowRect.right - kPad, y + m_rowH), valueColor);
+            }
+        }
+
+        rt->PopAxisAlignedClip();
+
+        if (lay.hasScrollbar)
+        {
+            D2D1_COLOR_F thumb = s.headerSubtext;
+            thumb.a = m_draggingThumb ? 0.85f : 0.5f;
+            brush->SetColor(thumb);
+            rt->FillRoundedRectangle(D2D1::RoundedRect(lay.thumb, 4.0f, 4.0f), brush);
+        }
+    }
+
+    bool Grid::OnMouseMove(float x, float y)
+    {
+        const Layout lay = Compute();
+        if (m_draggingThumb && lay.hasScrollbar)
+        {
+            const float thumbH = lay.thumb.bottom - lay.thumb.top;
+            const float travel = lay.viewH - thumbH;
+            const float newTop = y - m_dragGrabOffset - lay.data.top;
+            m_scrollY = (travel > 0.0f) ? (newTop / travel) * lay.maxScroll : 0.0f;
+            ClampScroll();
+            return true;
+        }
+        const int r = RowAtPoint(lay, x, y);
+        if (r != m_hover) { m_hover = r; return true; }
+        return false;
+    }
+
+    bool Grid::OnMouseLeave()
+    {
+        if (m_hover != -1) { m_hover = -1; return true; }
+        return false;
+    }
+
+    bool Grid::OnLButtonDown(float x, float y)
+    {
+        const Layout lay = Compute();
+        if (lay.hasScrollbar && Contains(lay.thumb, x, y))
+        {
+            m_draggingThumb = true;
+            m_dragGrabOffset = y - lay.thumb.top;
+            return false;
+        }
+        const int r = RowAtPoint(lay, x, y);
+        if (r >= 0 && r != m_selected) { m_selected = r; return true; }
+        return false;
+    }
+
+    bool Grid::OnLButtonUp()
+    {
+        if (m_draggingThumb) { m_draggingThumb = false; return false; }
+        return false;
+    }
+
+    bool Grid::OnWheel(int delta)
+    {
+        m_scrollY -= (static_cast<float>(delta) / WHEEL_DELTA) * 3.0f * m_rowH;
+        ClampScroll();
+        return true;
+    }
+
+    bool Grid::OnKey(int vk)
+    {
+        if (m_rows.empty()) return false;
+        const int n = static_cast<int>(m_rows.size());
+        const float viewH = m_bounds.bottom - m_bounds.top - m_headerH;
+        const int page = std::max(1, static_cast<int>(viewH / m_rowH));
+        int sel = m_selected;
+
+        switch (vk)
+        {
+        case VK_DOWN:  sel = (sel < 0) ? 0 : std::min(sel + 1, n - 1); break;
+        case VK_UP:    sel = (sel < 0) ? 0 : std::max(sel - 1, 0); break;
+        case VK_NEXT:  sel = (sel < 0) ? 0 : std::min(sel + page, n - 1); break;
+        case VK_PRIOR: sel = (sel < 0) ? 0 : std::max(sel - page, 0); break;
+        case VK_HOME:  sel = 0; break;
+        case VK_END:   sel = n - 1; break;
+        default:       return false;
+        }
+
+        m_selected = sel;
+        EnsureVisible(sel);
+        return true;
+    }
+}
