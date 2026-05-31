@@ -36,6 +36,7 @@ namespace ui
         m_scrollY = 0.0f;
         m_hover = -1;
         m_selected = -1;
+        m_editing = -1;
 
         const auto addGroup = [&](const std::vector<EnvVariable>& vars, bool readOnly) {
             for (const auto& v : vars)
@@ -50,6 +51,7 @@ namespace ui
                 {
                     // First folder sits on the variable row; the rest stack beneath it.
                     var.col2 = v.segments[0];
+                    var.original = var.col2;
                     var.invalid = !v.segment_valid.empty() && !v.segment_valid[0];
                     var.duplicate = !v.segment_duplicate.empty() && !v.segment_duplicate[0].empty();
                     m_rows.push_back(std::move(var));
@@ -58,6 +60,7 @@ namespace ui
                         Row seg{};
                         seg.kind = Row::Kind::Segment;
                         seg.col2 = v.segments[i];
+                        seg.original = seg.col2;
                         seg.depth = 1;
                         seg.readOnly = readOnly;
                         seg.invalid = (i < v.segment_valid.size()) && !v.segment_valid[i];
@@ -68,6 +71,7 @@ namespace ui
                 else
                 {
                     var.col2 = v.value;
+                    var.original = var.col2;
                     m_rows.push_back(std::move(var));
                 }
             }
@@ -109,8 +113,77 @@ namespace ui
 
     void Grid::ClampScroll()
     {
-        const Layout lay = Compute();
+        const Layout lay{Compute()};
         m_scrollY = std::clamp(m_scrollY, 0.0f, lay.maxScroll);
+    }
+
+    float Grid::NameColWidth() const
+    {
+        return std::min(260.0f, (m_bounds.right - m_bounds.left) * 0.34f);
+    }
+
+    D2D1_RECT_F Grid::ValueCellRect(int row) const
+    {
+        const Layout lay{Compute()};
+        const float rightEdge = lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f);
+        const float top = lay.data.top + static_cast<float>(row) * m_rowH - m_scrollY;
+        return D2D1::RectF(lay.data.left + kPad + NameColWidth(), top, rightEdge - kPad, top + m_rowH);
+    }
+
+    bool Grid::SelectionEditable() const
+    {
+        return m_selected >= 0 && m_selected < static_cast<int>(m_rows.size())
+            && !m_rows[static_cast<size_t>(m_selected)].readOnly;
+    }
+
+    std::optional<Grid::EditTarget> Grid::BeginEdit()
+    {
+        if (!SelectionEditable()) return std::nullopt;
+        EnsureVisible(m_selected);
+        m_editing = m_selected;
+        return EditTarget{ValueCellRect(m_selected), m_rows[static_cast<size_t>(m_selected)].col2};
+    }
+
+    void Grid::CommitEdit(const std::wstring& text)
+    {
+        if (m_editing < 0) return;
+        Row& r = m_rows[static_cast<size_t>(m_editing)];
+        r.col2 = text;
+        // Validity/duplicate flags are stale once edited; recomputed at save (Phase 3).
+        r.invalid = false;
+        r.duplicate = false;
+        m_editing = -1;
+    }
+
+    void Grid::CancelEdit()
+    {
+        m_editing = -1;
+    }
+
+    std::optional<Grid::EditTarget> Grid::BeginEditAt(float x, float y)
+    {
+        const Layout lay{Compute()};
+        const int row{RowAtPoint(lay, x, y)};
+        if (row < 0) return std::nullopt;
+        m_selected = row; // selection moves on any row double-click
+        const D2D1_RECT_F cell{ValueCellRect(row)};
+        if (x < cell.left || x >= cell.right) return std::nullopt; // double-click must hit the value
+        return BeginEdit(); // returns nullopt if the row is read-only
+    }
+
+    bool Grid::SelectNextEditable(int dir)
+    {
+        const int n{static_cast<int>(m_rows.size())};
+        for (int i{m_selected + dir}; i >= 0 && i < n; i += dir)
+        {
+            if (!m_rows[static_cast<size_t>(i)].readOnly)
+            {
+                m_selected = i;
+                EnsureVisible(i);
+                return true;
+            }
+        }
+        return false;
     }
 
     void Grid::EnsureVisible(int row)
@@ -130,9 +203,9 @@ namespace ui
     {
         m_bounds = bounds;
         ClampScroll();
-        const Layout lay = Compute();
+        const Layout lay{Compute()};
 
-        const float nameCol = std::min(260.0f, (bounds.right - bounds.left) * 0.34f);
+        const float nameCol{NameColWidth()};
 
         // Column header band.
         brush->SetColor(s.header.fill);
@@ -153,21 +226,23 @@ namespace ui
 
         rt->PushAxisAlignedClip(lay.data, D2D1_ANTIALIAS_MODE_ALIASED);
 
-        const float rightEdge = lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f);
-        int i = static_cast<int>(m_scrollY / m_rowH);
-        float y = lay.data.top - (m_scrollY - static_cast<float>(i) * m_rowH);
+        const float rightEdge{lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f)};
+        int i{static_cast<int>(m_scrollY / m_rowH)};
+        float y{lay.data.top - (m_scrollY - static_cast<float>(i) * m_rowH)};
         for (; i < static_cast<int>(m_rows.size()) && y < lay.data.bottom; ++i, y += m_rowH)
         {
-            const Row& r = m_rows[static_cast<size_t>(i)];
+            const Row& r{m_rows[static_cast<size_t>(i)]};
             const bool selected = (i == m_selected);
             const bool hovered = (i == m_hover && !selected);
+            const bool dirty = (r.col2 != r.original);
             const D2D1_RECT_F rowRect = D2D1::RectF(lay.data.left, y, rightEdge, y + m_rowH);
 
             // Fill (selection / hover win; then per-segment state; then base row).
-            D2D1_COLOR_F fill = s.row.fill;
+            D2D1_COLOR_F fill{s.row.fill};
             if (selected)        fill = s.rowSelected.fill;
             else if (hovered)    fill = s.rowHover.fill;
             else if (r.invalid)  fill = s.rowInvalid.fill;
+            else if (dirty)      fill = s.rowDirty.fill;
             else if (r.duplicate)fill = s.rowDuplicate.fill;
             brush->SetColor(fill);
             rt->FillRectangle(rowRect, brush);
@@ -181,15 +256,18 @@ namespace ui
             }
 
             // The name column never takes a path-state color (the name isn't a path).
-            D2D1_COLOR_F nameColor = s.row.text;
+            D2D1_COLOR_F nameColor{s.row.text};
             if (selected)        nameColor = s.rowSelected.text;
             else if (r.readOnly) nameColor = s.readonlyText;
             else if (hovered)    nameColor = s.rowHover.text;
 
             // The value column reflects the (first) path segment's state.
-            D2D1_COLOR_F valueColor = s.row.text;
-            if (selected)         valueColor = s.rowSelected.text;
-            else if (r.invalid)   valueColor = s.rowInvalid.text;
+            // Dirty/invalid win over selection so a just-committed (still-selected) row
+            // visibly shows its changed state.
+            D2D1_COLOR_F valueColor{s.row.text};
+            if (r.invalid)        valueColor = s.rowInvalid.text;
+            else if (dirty)       valueColor = s.rowDirty.text;
+            else if (selected)    valueColor = s.rowSelected.text;
             else if (r.duplicate) valueColor = s.rowDuplicate.text;
             else if (r.readOnly)  valueColor = s.readonlyText;
             else if (hovered)     valueColor = s.rowHover.text;
@@ -230,7 +308,7 @@ namespace ui
 
     bool Grid::OnMouseMove(float x, float y)
     {
-        const Layout lay = Compute();
+        const Layout lay{Compute()};
         if (m_draggingThumb && lay.hasScrollbar)
         {
             const float thumbH = lay.thumb.bottom - lay.thumb.top;
@@ -253,12 +331,12 @@ namespace ui
 
     bool Grid::OnLButtonDown(float x, float y)
     {
-        const Layout lay = Compute();
+        const Layout lay{Compute()};
         if (lay.hasScrollbar && Contains(lay.thumb, x, y))
         {
             m_draggingThumb = true;
             m_dragGrabOffset = y - lay.thumb.top;
-            return false;
+            return true; // thumb darkens while grabbed
         }
         const int r = RowAtPoint(lay, x, y);
         if (r >= 0 && r != m_selected) { m_selected = r; return true; }
@@ -267,7 +345,7 @@ namespace ui
 
     bool Grid::OnLButtonUp()
     {
-        if (m_draggingThumb) { m_draggingThumb = false; return false; }
+        if (m_draggingThumb) { m_draggingThumb = false; return true; } // thumb lightens on release
         return false;
     }
 

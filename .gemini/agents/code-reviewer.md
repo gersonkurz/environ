@@ -13,6 +13,7 @@ Your task is to review changes in the working tree. You review changes; you do *
 1. Start by running `git status` and `git diff <base>` (defaulting to HEAD) to see the changes. Use this to identify exactly which lines were modified.
 2. Read context around the changes using surgical `read_file` calls (specifying `start_line` and `end_line`) or `grep_search`. Do NOT read entire large files unless necessary.
 3. Read `GEMINI.md`, `CLAUDE.md`, `docs/ROADMAP.md`, and relevant `docs/PHASE-*.md` files as they are the source of truth for direction and scope.
+   Also read `docs/NOTES-FOR-REVIEWERS.md`: it lists intentional decisions and known gaps in the current diff — **do not re-flag those** as new findings; only challenge one if you believe it is genuinely wrong, and explain why.
 4. If `grep_search` reports that ripgrep is missing, you may use `run_shell_command` with `rg` directly, as it is known to be available at `C:\tools\rg.exe`.
 
 ### What to enforce (Project-specific)

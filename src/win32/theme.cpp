@@ -80,6 +80,7 @@ namespace theme
             s.rowInvalid = ReadStyle(t, "row_invalid", base.rowInvalid);
             s.rowDuplicate = ReadStyle(t, "row_duplicate", base.rowDuplicate);
             s.captionCloseHover = ReadStyle(t, "caption_close_hover", base.captionCloseHover);
+            s.edit = ReadStyle(t, "edit", base.edit);
             return s;
         }
 
@@ -101,7 +102,8 @@ namespace theme
                 .rowDirty{.fill{Rgb(0x2B2B2B)}, .border{Rgb(0x2B2B2B)}, .text{Rgb(0xFFD479)}, .borderWidth{0.0f}},
                 .rowInvalid{.fill{Rgb(0x3A2323)}, .border{Rgb(0x5A2D2D)}, .text{Rgb(0xFF99A0)}, .borderWidth{1.0f}},
                 .rowDuplicate{.fill{Rgb(0x2B2B2B)}, .border{Rgb(0x2B2B2B)}, .text{Rgb(0xFFB454)}, .borderWidth{0.0f}},
-                .captionCloseHover{.fill{Rgb(0xC42B1C)}, .border{Rgb(0xC42B1C)}, .text{Rgb(0xFFFFFF)}, .borderWidth{0.0f}}};
+                .captionCloseHover{.fill{Rgb(0xC42B1C)}, .border{Rgb(0xC42B1C)}, .text{Rgb(0xFFFFFF)}, .borderWidth{0.0f}},
+                .edit{.fill{Rgb(0x1A1A1A)}, .border{Rgb(0x4CC2FF)}, .text{Rgb(0xF3F3F3)}, .borderWidth{1.0f}}};
         }
 
         ColorScheme BuiltinLight()
@@ -122,7 +124,8 @@ namespace theme
                 .rowDirty{.fill{Rgb(0xFFFFFF)}, .border{Rgb(0xFFFFFF)}, .text{Rgb(0x8A5A00)}, .borderWidth{0.0f}},
                 .rowInvalid{.fill{Rgb(0xFCEBEC)}, .border{Rgb(0xF1C7CB)}, .text{Rgb(0xB42330)}, .borderWidth{1.0f}},
                 .rowDuplicate{.fill{Rgb(0xFFFFFF)}, .border{Rgb(0xFFFFFF)}, .text{Rgb(0x9A6A00)}, .borderWidth{0.0f}},
-                .captionCloseHover{.fill{Rgb(0xC42B1C)}, .border{Rgb(0xC42B1C)}, .text{Rgb(0xFFFFFF)}, .borderWidth{0.0f}}};
+                .captionCloseHover{.fill{Rgb(0xC42B1C)}, .border{Rgb(0xC42B1C)}, .text{Rgb(0xFFFFFF)}, .borderWidth{0.0f}},
+                .edit{.fill{Rgb(0xFFFFFF)}, .border{Rgb(0x005FB8)}, .text{Rgb(0x1A1A1A)}, .borderWidth{1.0f}}};
         }
 
         ColorScheme BuiltinBlue()
@@ -143,7 +146,8 @@ namespace theme
                 .rowDirty{.fill{Rgb(0x103459)}, .border{Rgb(0x103459)}, .text{Rgb(0xFFD479)}, .borderWidth{0.0f}},
                 .rowInvalid{.fill{Rgb(0x3D1F2A)}, .border{Rgb(0x6B3040)}, .text{Rgb(0xFF9FB0)}, .borderWidth{1.0f}},
                 .rowDuplicate{.fill{Rgb(0x103459)}, .border{Rgb(0x103459)}, .text{Rgb(0xFFC773)}, .borderWidth{0.0f}},
-                .captionCloseHover{.fill{Rgb(0xC42B1C)}, .border{Rgb(0xC42B1C)}, .text{Rgb(0xFFFFFF)}, .borderWidth{0.0f}}};
+                .captionCloseHover{.fill{Rgb(0xC42B1C)}, .border{Rgb(0xC42B1C)}, .text{Rgb(0xFFFFFF)}, .borderWidth{0.0f}},
+                .edit{.fill{Rgb(0x07203A)}, .border{Rgb(0x59B0FF)}, .text{Rgb(0xEAF2FB)}, .borderWidth{1.0f}}};
         }
 
         // Read the theme file with a Unicode-safe Win32 call. (Deliberately NOT pnq's

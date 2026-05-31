@@ -49,10 +49,10 @@ Gate: builds clean at `/W4 /WX`, zero warnings.
 ## Phases
 - **Phase 0 — Foundation (done).** Build loop, D2D/DWrite proof window, theme engine
   (TOML-driven, dark/light/blue, live swap).
-- **Phase 1 — Read-only spine (next).** Custom title bar + virtualized themed grid
+- **Phase 1 — Read-only spine (done).** Custom title bar + virtualized themed grid
   wired to `EnvStore`, showing real user/machine vars. No editing. See `docs/PHASE-1.md`.
-- **Phase 2 — Inline editing.** Skinned `EDIT` cell editor, dirty tracking, per-segment
-  path editing. No registry write yet.
+- **Phase 2 — Inline editing (current).** Skinned `EDIT` cell editor, dirty tracking,
+  per-segment path editing. No registry write yet. See `docs/PHASE-2.md`.
 - **Phase 3 — Apply / save.** `EnvWriter` apply path, dry-run review, conflict detection,
   `WM_SETTINGCHANGE` broadcast.
 - **Phase 4 — Snapshots & history.** `SnapshotStore` wiring, history view, restore, diff.

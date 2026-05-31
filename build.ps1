@@ -56,7 +56,7 @@ $clArgs = @(
     "/Fo:$out\", "/Fe:$exe"
 ) + $sources + @(
     '/link', '/SUBSYSTEM:WINDOWS',
-    'd2d1.lib', 'dwrite.lib', 'dwmapi.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib', 'advapi32.lib'
+    'd2d1.lib', 'dwrite.lib', 'dwmapi.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib', 'advapi32.lib', 'comctl32.lib'
 )
 
 Write-Host "Compiling $($sources.Count) file(s)..." -ForegroundColor Cyan

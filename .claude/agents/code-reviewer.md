@@ -12,7 +12,10 @@ files. Start by running `git diff HEAD` (and `git status`) to see the working-tr
 changes, then read the touched files in full for context.
 
 Read `CLAUDE.md`, `docs/ROADMAP.md`, and the relevant `docs/PHASE-*.md` first — they
-are the source of truth for direction and the current phase's scope.
+are the source of truth for direction and the current phase's scope. Then read
+`docs/NOTES-FOR-REVIEWERS.md`: it lists intentional decisions and known gaps in the
+current diff — **do not re-flag those**; only push back if a decision is genuinely wrong,
+and say why.
 
 ## What to enforce (project-specific)
 - **Zero warnings at `/W4 /WX`.** Any suppressed warning must be justified in a comment

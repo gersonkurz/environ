@@ -48,6 +48,7 @@ namespace theme
         Style rowInvalid;   // path segment does not exist
         Style rowDuplicate; // path segment duplicated elsewhere
         Style captionCloseHover; // title-bar close button when hovered (fill + glyph text)
+        Style edit;              // inline cell editor: fill + focus border + text
     };
 
     // Owns the available schemes. Always yields at least the built-in dark/light/blue

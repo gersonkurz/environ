@@ -7,7 +7,8 @@ A Windows 11 environment-variable editor — a modern replacement for the built-
 **Pure Win32 + Direct2D + DirectWrite, C++20, MSVC.** No WinRT, no C#, no .NET, no vcpkg.
 Our own code is exception-free. Goal: one small self-contained exe (~300 KB), instant startup.
 
-See `docs/ROADMAP.md` for direction and phases, `docs/PHASE-1.md` for the current slice.
+See `docs/ROADMAP.md` for direction and phases, and the active `docs/PHASE-*.md` for the
+current slice (Phase 2 — inline editing — as of this writing).
 
 ## Direction — READ THIS FIRST
 The UI host was **rewritten from WinUI to pure Win32 + Direct2D/DirectWrite** (2026-05-30),

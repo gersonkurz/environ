@@ -18,6 +18,7 @@ row_dirty     = { fill = "#2B2B2B", border = "#2B2B2B", text = "#FFD479" }
 row_invalid   = { fill = "#3A2323", border = "#5A2D2D", text = "#FF99A0", border_width = 1.0 }
 row_duplicate = { fill = "#2B2B2B", border = "#2B2B2B", text = "#FFB454" }
 caption_close_hover = { fill = "#C42B1C", text = "#FFFFFF" }
+edit = { fill = "#1A1A1A", border = "#4CC2FF", text = "#F3F3F3", border_width = 1.0 }
 
 [light]
 window_bg      = "#F3F3F3"
@@ -35,6 +36,7 @@ row_dirty     = { fill = "#FFFFFF", border = "#FFFFFF", text = "#8A5A00" }
 row_invalid   = { fill = "#FCEBEC", border = "#F1C7CB", text = "#B42330", border_width = 1.0 }
 row_duplicate = { fill = "#FFFFFF", border = "#FFFFFF", text = "#9A6A00" }
 caption_close_hover = { fill = "#C42B1C", text = "#FFFFFF" }
+edit = { fill = "#FFFFFF", border = "#005FB8", text = "#1A1A1A", border_width = 1.0 }
 
 [blue]
 window_bg      = "#0A2540"
@@ -52,3 +54,4 @@ row_dirty     = { fill = "#103459", border = "#103459", text = "#FFD479" }
 row_invalid   = { fill = "#3D1F2A", border = "#6B3040", text = "#FF9FB0", border_width = 1.0 }
 row_duplicate = { fill = "#103459", border = "#103459", text = "#FFC773" }
 caption_close_hover = { fill = "#C42B1C", text = "#FFFFFF" }
+edit = { fill = "#07203A", border = "#59B0FF", text = "#EAF2FB", border_width = 1.0 }

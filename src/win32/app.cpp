@@ -1,10 +1,11 @@
-// environ — Win32 host entry point (Phase 1, read-only).
+// environ — Win32 host entry point (Phase 2: read + inline editing, no registry write yet).
 // Pure Win32 + Direct2D + DirectWrite. Frameless window with a custom-drawn title bar.
-// Owns the window, D2D device resources, theme, and grid; loads live data from core
-// EnvStore and forwards input.
+// Owns the window, D2D device resources, theme, grid, and the inline EDIT editor; loads
+// live data from core EnvStore and forwards input.
 
 #include <windows.h>
 #include <windowsx.h>
+#include <commctrl.h>
 #include <d2d1.h>
 #include <d2d1helper.h>
 #include <dwrite.h>
@@ -34,6 +35,10 @@ namespace
     constexpr float kCaptionH{40.0f};
     constexpr float kBtnW{46.0f};
 
+    // Posted by the editor subclass back to the window. wParam: 0 = cancel, 1 = commit,
+    // 2 = commit + move (Tab); lParam (Tab only): 1 = Shift (move up), 0 = move down.
+    constexpr UINT WM_APP_EDIT_END{WM_APP + 1};
+
     // Segoe Fluent Icons glyphs (PUA codepoints, numeric to avoid source-encoding issues).
     constexpr wchar_t kGlyphMin{0xE921};
     constexpr wchar_t kGlyphMax{0xE922};
@@ -61,6 +66,10 @@ namespace
     bool g_elevated{false};
     bool g_tracking{false};
     int g_capHover{-1}; // 0 = min, 1 = max, 2 = close, -1 = none
+
+    HWND g_edit{nullptr};       // inline cell editor (skinned standard EDIT)
+    HFONT g_editFont{nullptr};
+    HBRUSH g_editBrush{nullptr}; // for WM_CTLCOLOREDIT
 
     bool Contains(const D2D1_RECT_F& r, float x, float y)
     {
@@ -92,6 +101,30 @@ namespace
 
     float DipScale(HWND hwnd) { return static_cast<float>(GetDpiForWindow(hwnd)) / 96.0f; }
     void Repaint(HWND hwnd, bool needed) { if (needed) InvalidateRect(hwnd, nullptr, FALSE); }
+
+    COLORREF ToColorRef(const D2D1_COLOR_F& c)
+    {
+        return RGB(static_cast<BYTE>(c.r * 255.0f), static_cast<BYTE>(c.g * 255.0f), static_cast<BYTE>(c.b * 255.0f));
+    }
+
+    // The editor brush only changes with the theme; the font only with DPI. Cache both and
+    // refresh on those events rather than rebuilding per WM_CTLCOLOREDIT / per edit.
+    void RefreshEditBrush()
+    {
+        if (g_editBrush) { DeleteObject(g_editBrush); g_editBrush = nullptr; }
+        g_editBrush = CreateSolidBrush(ToColorRef(g_theme.Current().edit.fill));
+    }
+
+    void RefreshEditFont(HWND hwnd)
+    {
+        if (!g_edit) return;
+        if (g_editFont) DeleteObject(g_editFont);
+        const int h{static_cast<int>(12.0f * DipScale(hwnd))};
+        g_editFont = CreateFontW(-h, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                 CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
+        SendMessageW(g_edit, WM_SETFONT, reinterpret_cast<WPARAM>(g_editFont), TRUE);
+    }
 
     void DiscardDeviceResources()
     {
@@ -171,8 +204,8 @@ namespace
         g_rt->BeginDraw();
         g_rt->Clear(s.windowBg);
 
-        const D2D1_SIZE_F sz = g_rt->GetSize();
-        const float pad = 16.0f;
+        const D2D1_SIZE_F sz{g_rt->GetSize()};
+        const float pad{16.0f};
 
         DrawCaption(s, sz.width);
 
@@ -218,6 +251,120 @@ namespace
         return fmt;
     }
 
+    // Subclass for the inline EDIT: intercept Enter/Esc/Tab (which a bare EDIT ignores or
+    // beeps on) and hand control back to the window via a posted message.
+    LRESULT CALLBACK EditSubclass(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR ref)
+    {
+        HWND parent{reinterpret_cast<HWND>(ref)};
+        if (msg == WM_KEYDOWN)
+        {
+            if (wp == VK_RETURN) { PostMessageW(parent, WM_APP_EDIT_END, 1, 0); return 0; }
+            if (wp == VK_ESCAPE) { PostMessageW(parent, WM_APP_EDIT_END, 0, 0); return 0; }
+            if (wp == VK_TAB)    { PostMessageW(parent, WM_APP_EDIT_END, 2, (GetKeyState(VK_SHIFT) < 0) ? 1 : 0); return 0; }
+            if (wp == VK_F1 || wp == VK_F2 || wp == VK_F3)
+            {
+                PostMessageW(parent, WM_APP_EDIT_END, 1, 0); // commit, then let the parent switch theme
+                PostMessageW(parent, WM_KEYDOWN, wp, lp);
+                return 0;
+            }
+        }
+        else if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_ESCAPE || wp == VK_TAB))
+        {
+            return 0; // swallow to avoid the EDIT beep
+        }
+        return DefSubclassProc(h, msg, wp, lp);
+    }
+
+    void EnsureEditControl(HWND hwnd)
+    {
+        if (g_edit) return;
+        g_edit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | ES_AUTOHSCROLL, 0, 0, 0, 0,
+                                 hwnd, nullptr,
+                                 reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE)), nullptr);
+        if (!g_edit)
+        {
+            spdlog::error("inline edit control creation failed");
+            return;
+        }
+        if (!SetWindowSubclass(g_edit, EditSubclass, 1, reinterpret_cast<DWORD_PTR>(hwnd)))
+        {
+            spdlog::error("SetWindowSubclass for edit control failed");
+            DestroyWindow(g_edit);
+            g_edit = nullptr;
+            return;
+        }
+        RefreshEditFont(hwnd);
+        SendMessageW(g_edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, 0);
+    }
+
+    void EndEdit(HWND hwnd, bool commit)
+    {
+        if (!g_edit || !IsWindowVisible(g_edit)) return;
+        if (commit)
+        {
+            const int len{GetWindowTextLengthW(g_edit)};
+            std::wstring text(static_cast<size_t>(len) + 1, L'\0'); // +1 writable slot for the terminator
+            const int copied{GetWindowTextW(g_edit, text.data(), len + 1)};
+            text.resize(static_cast<size_t>(copied));
+            g_grid.CommitEdit(text);
+        }
+        else
+        {
+            g_grid.CancelEdit();
+        }
+        ShowWindow(g_edit, SW_HIDE);
+        SetFocus(hwnd);
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
+    // Place the editor over the target cell: one line tall, centered, themed font.
+    void PositionEditor(HWND hwnd, const ui::Grid::EditTarget& target)
+    {
+        const float scale{DipScale(hwnd)};
+        const auto px = [scale](float dip) { return static_cast<int>(dip * scale); };
+        const D2D1_RECT_F& c{target.cell};
+
+        // Font + margins are set once in EnsureEditControl (and on DPI change). Here we only
+        // size and place the control: a single-line EDIT top-aligns its text, so make it
+        // exactly one line tall (from the font metrics) and center that in the cell.
+        TEXTMETRICW tm{};
+        if (const HDC dc{GetDC(g_edit)})
+        {
+            const HGDIOBJ prev{SelectObject(dc, g_editFont)};
+            GetTextMetricsW(dc, &tm);
+            SelectObject(dc, prev);
+            ReleaseDC(g_edit, dc);
+        }
+        const int cellTop{px(c.top)};
+        const int cellH{px(c.bottom) - cellTop};
+        const int editH{tm.tmHeight > 0 ? static_cast<int>(tm.tmHeight) : px(16.0f)};
+        MoveWindow(g_edit, px(c.left), cellTop + (cellH - editH) / 2,
+                   px(c.right) - px(c.left), editH, FALSE);
+
+        SetWindowTextW(g_edit, target.text.c_str());
+        ShowWindow(g_edit, SW_SHOW);
+        SetFocus(g_edit);
+        SendMessageW(g_edit, EM_SETSEL, 0, -1);
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
+    void BeginEditFromGrid(HWND hwnd)
+    {
+        if (!g_grid.SelectionEditable()) return; // nothing to edit; don't even create the control
+        EnsureEditControl(hwnd);
+        if (!g_edit) return; // creation failed; don't leave the grid stuck in editing state
+        if (const auto target{g_grid.BeginEdit()}) PositionEditor(hwnd, *target);
+    }
+
+    void BeginEditAt(HWND hwnd, float x, float y)
+    {
+        EnsureEditControl(hwnd);
+        if (!g_edit) return;
+        const auto target{g_grid.BeginEditAt(x, y)};
+        InvalidateRect(hwnd, nullptr, FALSE); // selection may have moved even if not editable
+        if (target) PositionEditor(hwnd, *target);
+    }
+
     LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
         switch (msg)
@@ -245,7 +392,7 @@ namespace
             ScreenToClient(hwnd, &pt);
             RECT rc{};
             GetClientRect(hwnd, &rc);
-            const float scale = DipScale(hwnd);
+            const float scale{DipScale(hwnd)};
             if (!IsZoomed(hwnd))
             {
                 const int m = static_cast<int>(8 * scale);
@@ -267,13 +414,20 @@ namespace
         }
         case WM_KEYDOWN:
         {
+            if (wp == VK_RETURN) { BeginEditFromGrid(hwnd); return 0; }
             const char* want{nullptr};
             if (wp == VK_F1) want = "dark";
             else if (wp == VK_F2) want = "light";
             else if (wp == VK_F3) want = "blue";
             if (want)
             {
-                if (g_theme.SelectByName(want)) { ApplyTitleBar(hwnd); InvalidateRect(hwnd, nullptr, FALSE); }
+                if (g_grid.IsEditing()) EndEdit(hwnd, true); // defensive: never switch theme mid-edit
+                if (g_theme.SelectByName(want))
+                {
+                    ApplyTitleBar(hwnd);
+                    if (g_editBrush) RefreshEditBrush(); // re-tint the cached editor brush
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
             }
             else
             {
@@ -289,7 +443,7 @@ namespace
                 TrackMouseEvent(&tme);
                 g_tracking = true;
             }
-            const float scale = DipScale(hwnd);
+            const float scale{DipScale(hwnd)};
             RECT rc{};
             GetClientRect(hwnd, &rc);
             const float xDip{GET_X_LPARAM(lp) / scale}, yDip{GET_Y_LPARAM(lp) / scale};
@@ -311,7 +465,7 @@ namespace
         }
         case WM_LBUTTONDOWN:
         {
-            const float scale = DipScale(hwnd);
+            const float scale{DipScale(hwnd)};
             RECT rc{};
             GetClientRect(hwnd, &rc);
             const float xDip{GET_X_LPARAM(lp) / scale}, yDip{GET_Y_LPARAM(lp) / scale};
@@ -328,8 +482,37 @@ namespace
             ReleaseCapture();
             Repaint(hwnd, g_grid.OnLButtonUp());
             return 0;
+        case WM_LBUTTONDBLCLK:
+        {
+            const float scale{DipScale(hwnd)};
+            BeginEditAt(hwnd, GET_X_LPARAM(lp) / scale, GET_Y_LPARAM(lp) / scale);
+            return 0;
+        }
         case WM_MOUSEWHEEL:
+            if (g_grid.IsEditing()) EndEdit(hwnd, true);
             Repaint(hwnd, g_grid.OnWheel(GET_WHEEL_DELTA_WPARAM(wp)));
+            return 0;
+        case WM_CTLCOLOREDIT:
+            if (reinterpret_cast<HWND>(lp) == g_edit)
+            {
+                const theme::ColorScheme& s{g_theme.Current()};
+                SetTextColor(reinterpret_cast<HDC>(wp), ToColorRef(s.edit.text));
+                SetBkColor(reinterpret_cast<HDC>(wp), ToColorRef(s.edit.fill));
+                if (!g_editBrush) RefreshEditBrush();
+                return reinterpret_cast<LRESULT>(g_editBrush);
+            }
+            break;
+        case WM_COMMAND:
+            if (reinterpret_cast<HWND>(lp) == g_edit && HIWORD(wp) == EN_KILLFOCUS)
+            {
+                EndEdit(hwnd, true);
+                return 0;
+            }
+            break;
+        case WM_APP_EDIT_END:
+            EndEdit(hwnd, wp != 0);
+            if (wp == 2 && g_grid.SelectNextEditable(lp != 0 ? -1 : 1)) // Tab → next editable row
+                BeginEditFromGrid(hwnd);
             return 0;
         case WM_PAINT:
         {
@@ -340,6 +523,7 @@ namespace
             return 0;
         }
         case WM_SIZE:
+            if (g_grid.IsEditing()) EndEdit(hwnd, true);
             if (g_rt)
             {
                 if (g_rt->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp))) == D2DERR_RECREATE_TARGET)
@@ -349,14 +533,18 @@ namespace
             return 0;
         case WM_DPICHANGED:
         {
-            const RECT* const r = reinterpret_cast<RECT*>(lp);
+            if (g_grid.IsEditing()) EndEdit(hwnd, true);
+            const RECT* const r{reinterpret_cast<RECT*>(lp)};
             SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
+            RefreshEditFont(hwnd); // re-create the editor font at the new DPI for next time
             DiscardDeviceResources();
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
         case WM_DESTROY:
+            if (g_editBrush) { DeleteObject(g_editBrush); g_editBrush = nullptr; }
+            if (g_editFont)  { DeleteObject(g_editFont);  g_editFont = nullptr; }
             ReleaseGraphics();
             PostQuitMessage(0);
             return 0;
@@ -396,12 +584,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_d2d)))
     {
         spdlog::error("D2D1CreateFactory failed");
+        ReleaseGraphics();
         return 1;
     }
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                    reinterpret_cast<IUnknown**>(&g_dw))))
     {
         spdlog::error("DWriteCreateFactory failed");
+        ReleaseGraphics();
         return 1;
     }
 
@@ -410,12 +600,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     g_fmtCaption = MakeFormat(L"Segoe UI Variable Text", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
     g_fmtSub     = MakeFormat(L"Segoe UI Variable Text", 12.0f, DWRITE_FONT_WEIGHT_NORMAL, false);
     g_fmtName    = MakeFormat(L"Segoe UI Variable Text", 14.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
-    g_fmtValue   = MakeFormat(L"Segoe UI Variable Small", 12.0f, DWRITE_FONT_WEIGHT_NORMAL, true);
+    g_fmtValue   = MakeFormat(L"Segoe UI Variable Small", 11.5f, DWRITE_FONT_WEIGHT_NORMAL, true);
     g_fmtHeader  = MakeFormat(L"Segoe UI Variable Small", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
     g_fmtGlyph   = MakeFormat(L"Segoe Fluent Icons", 10.0f, DWRITE_FONT_WEIGHT_NORMAL, true, true);
     if (!g_fmtCaption || !g_fmtSub || !g_fmtName || !g_fmtValue || !g_fmtHeader || !g_fmtGlyph)
     {
         spdlog::error("text format creation failed");
+        ReleaseGraphics();
         return 1;
     }
 
@@ -423,6 +614,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
+    wc.style = CS_DBLCLKS; // deliver WM_LBUTTONDBLCLK
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInst;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
@@ -430,11 +622,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     RegisterClassExW(&wc);
 
     g_hwnd = CreateWindowExW(
-        0, wc.lpszClassName, L"environ", WS_OVERLAPPEDWINDOW,
+        0, wc.lpszClassName, L"environ", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT, 860, 620, nullptr, nullptr, hInst, nullptr);
     if (!g_hwnd)
     {
         spdlog::error("CreateWindowExW failed");
+        ReleaseGraphics();
         return 1;
     }
 

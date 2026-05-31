@@ -17,7 +17,7 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
 }
 
 $prompt = @"
-Review the environ Win32 host changes in this working tree. Diff base: $Base (run: git diff $Base). Apply your full review checklist and the rules in CLAUDE.md / docs/ROADMAP.md / the current docs/PHASE-*.md. Report findings grouped Critical / Warning / Suggestion, each with file:line and a concrete fix. Read-only: do not modify files.
+Review the environ Win32 host changes in this working tree. Diff base: $Base (run: git diff $Base). Apply your full review checklist and the rules in CLAUDE.md / docs/ROADMAP.md / the current docs/PHASE-*.md. First read docs/NOTES-FOR-REVIEWERS.md and do NOT re-flag the intentional decisions / known gaps it lists (only challenge one if it is genuinely wrong, and say why). Report findings grouped Critical / Warning / Suggestion, each with file:line and a concrete fix. Read-only: do not modify files.
 "@
 
 if ($Headless) {
