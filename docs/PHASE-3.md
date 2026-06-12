@@ -40,6 +40,15 @@ behind a confirmation preview, then reload so the grid reflects the saved state.
   reported as skipped, not silently dropped.
 - After a successful apply, dirty markers clear.
 
+## Increment 3B — write-hardening + themed review
+- **Path-list fidelity:** preserve the original separator structure (empty/trailing entries)
+  when re-serializing an edited path-list — replace only the edited segments in place
+  (core helper), instead of normalizing via `join_segments`.
+- **Conflict detection:** at save, re-read the registry and compare to the load-time
+  baseline; if it changed underneath us, warn before overwriting.
+- **Themed review panel:** replace the `MessageBox` confirm with a custom-drawn, themed
+  in-app review (scope-grouped change list, Apply/Cancel) — design confirmed with the user
+  before building.
+
 ## Handoff
-Run `.\review.ps1` at completion; address findings before 3B (themed review + conflict
-detection) or Phase 4.
+Run `.\review.ps1` at completion; address findings before Phase 4 (snapshots/history).

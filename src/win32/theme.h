@@ -35,6 +35,8 @@ namespace theme
         std::string name;
         D2D1_COLOR_F windowBg;
         D2D1_COLOR_F accent;
+        D2D1_COLOR_F accentText; // text drawn on an accent fill (e.g. primary button)
+        D2D1_COLOR_F scrim;      // translucent backdrop behind a modal
         D2D1_COLOR_F headerText;
         D2D1_COLOR_F headerSubtext;
         D2D1_COLOR_F readonlyText; // machine vars when unelevated

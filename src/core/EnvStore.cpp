@@ -249,6 +249,49 @@ std::wstring join_segments(std::vector<std::wstring> const& segments) {
     return result;
 }
 
+std::wstring apply_segment_edits(std::wstring const& original_value,
+                                 std::vector<std::wstring> const& edited_segments) {
+    // Split the original preserving structure (keep empty entries and a trailing separator).
+    std::vector<std::wstring> raw_parts;
+    std::wstring current;
+    for (const auto ch : original_value) {
+        if (ch == L';') {
+            raw_parts.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(ch);
+        }
+    }
+    raw_parts.push_back(current);
+
+    std::size_t non_empty{0};
+    for (const auto& part : raw_parts) {
+        if (!part.empty()) {
+            ++non_empty;
+        }
+    }
+    if (non_empty != edited_segments.size()) {
+        // Structure doesn't line up with the visible segments; normalize as a fallback.
+        return join_segments(edited_segments);
+    }
+
+    std::size_t k{0};
+    for (auto& part : raw_parts) {
+        if (!part.empty()) {
+            part = edited_segments[k++];
+        }
+    }
+
+    std::wstring result;
+    for (std::size_t i{0}; i < raw_parts.size(); ++i) {
+        if (i != 0) {
+            result.push_back(L';');
+        }
+        result += raw_parts[i];
+    }
+    return result;
+}
+
 bool is_elevated() {
     BOOL elevated{FALSE};
     HANDLE token{nullptr};

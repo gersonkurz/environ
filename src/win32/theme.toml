@@ -5,6 +5,8 @@
 [dark]
 window_bg      = "#1F1F1F"
 accent         = "#4CC2FF"
+accent_text    = "#102A33"
+scrim          = "#00000080"
 header_text    = "#F3F3F3"
 header_subtext = "#9D9D9D"
 readonly_text  = "#6E6E6E"
@@ -23,6 +25,8 @@ edit = { fill = "#1A1A1A", border = "#4CC2FF", text = "#F3F3F3", border_width = 
 [light]
 window_bg      = "#F3F3F3"
 accent         = "#005FB8"
+accent_text    = "#FFFFFF"
+scrim          = "#00000066"
 header_text    = "#1A1A1A"
 header_subtext = "#616161"
 readonly_text  = "#9A9A9A"
@@ -41,6 +45,8 @@ edit = { fill = "#FFFFFF", border = "#005FB8", text = "#1A1A1A", border_width = 
 [blue]
 window_bg      = "#0A2540"
 accent         = "#59B0FF"
+accent_text    = "#06243B"
+scrim          = "#00000080"
 header_text    = "#EAF2FB"
 header_subtext = "#8FB3D9"
 readonly_text  = "#6E8FB5"

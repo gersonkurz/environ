@@ -10,6 +10,7 @@
 #include <d2d1helper.h>
 #include <dwrite.h>
 #include <dwmapi.h>
+#include <algorithm>
 #include <format>
 #include <string>
 #include <vector>
@@ -59,6 +60,7 @@ namespace
     IDWriteTextFormat* g_fmtValue{nullptr};
     IDWriteTextFormat* g_fmtHeader{nullptr};
     IDWriteTextFormat* g_fmtGlyph{nullptr};
+    IDWriteTextFormat* g_fmtButton{nullptr}; // centered button label
 
     theme::ThemeSet g_theme;
     ui::Grid g_grid;
@@ -71,6 +73,15 @@ namespace
     HWND g_edit{nullptr};       // inline cell editor (skinned standard EDIT)
     HFONT g_editFont{nullptr};
     HBRUSH g_editBrush{nullptr}; // for WM_CTLCOLOREDIT
+
+    // Apply-review modal state (Phase 3B). When open, the grid is inert and the panel owns input.
+    bool g_reviewOpen{false};
+    int g_reviewHover{-1}; // 0 = Cancel, 1 = Apply, -1 = none
+    bool g_eatNextDblClk{false}; // swallow the trailing dblclk of a modal-closing click
+    std::vector<Environ::core::EnvChange> g_reviewUser;
+    std::vector<Environ::core::EnvChange> g_reviewMachine;
+    std::vector<Environ::core::EnvVariable> g_reviewCurUser;
+    std::vector<Environ::core::EnvVariable> g_reviewCurMachine;
 
     bool Contains(const D2D1_RECT_F& r, float x, float y)
     {
@@ -137,7 +148,7 @@ namespace
     void ReleaseGraphics()
     {
         DiscardDeviceResources();
-        for (IDWriteTextFormat** fmt : {&g_fmtCaption, &g_fmtSub, &g_fmtName, &g_fmtValue, &g_fmtHeader, &g_fmtGlyph})
+        for (IDWriteTextFormat** fmt : {&g_fmtCaption, &g_fmtSub, &g_fmtName, &g_fmtValue, &g_fmtHeader, &g_fmtGlyph, &g_fmtButton})
         {
             if (*fmt) { (*fmt)->Release(); *fmt = nullptr; }
         }
@@ -197,6 +208,92 @@ namespace
         }
     }
 
+    struct ReviewGeom
+    {
+        D2D1_RECT_F card;
+        D2D1_RECT_F list;
+        D2D1_RECT_F cancelBtn;
+        D2D1_RECT_F applyBtn;
+    };
+
+    ReviewGeom ReviewLayout(const D2D1_SIZE_F& sz)
+    {
+        const float cw{std::min(520.0f, sz.width - 80.0f)};
+        const float pad{20.0f};
+        const float titleH{36.0f};
+        const float lineH{22.0f};
+        const float btnRow{56.0f};
+        const int lineCount{
+            (g_reviewUser.empty() ? 0 : 1 + static_cast<int>(g_reviewUser.size())) +
+            (g_reviewMachine.empty() ? 0 : 1 + static_cast<int>(g_reviewMachine.size()))};
+        const float listH{std::min(static_cast<float>(lineCount) * lineH, sz.height * 0.5f)};
+        const float ch{pad + titleH + listH + btnRow + pad};
+        const float cx{(sz.width - cw) / 2.0f};
+        const float cy{(sz.height - ch) / 2.0f};
+
+        ReviewGeom g{};
+        g.card = D2D1::RectF(cx, cy, cx + cw, cy + ch);
+        g.list = D2D1::RectF(cx + pad, cy + pad + titleH, cx + cw - pad, cy + pad + titleH + listH);
+        constexpr float bw{96.0f};
+        constexpr float bh{34.0f};
+        const float by{g.card.bottom - pad - bh};
+        g.applyBtn = D2D1::RectF(g.card.right - pad - bw, by, g.card.right - pad, by + bh);
+        g.cancelBtn = D2D1::RectF(g.applyBtn.left - 12.0f - bw, by, g.applyBtn.left - 12.0f, by + bh);
+        return g;
+    }
+
+    void DrawReviewButton(const D2D1_RECT_F& r, const wchar_t* label, bool primary, bool hover,
+                          const theme::ColorScheme& s)
+    {
+        g_brush->SetColor(primary ? s.accent : (hover ? s.rowSelected.fill : s.rowHover.fill));
+        g_rt->FillRoundedRectangle(D2D1::RoundedRect(r, 6.0f, 6.0f), g_brush);
+        if (!primary)
+        {
+            g_brush->SetColor(s.card.border);
+            g_rt->DrawRoundedRectangle(D2D1::RoundedRect(r, 6.0f, 6.0f), g_brush, 1.0f);
+        }
+        g_brush->SetColor(primary ? s.accentText : s.headerText);
+        g_rt->DrawTextW(label, static_cast<UINT32>(wcslen(label)), g_fmtButton, r, g_brush,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
+    void PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F& sz)
+    {
+        const ReviewGeom g{ReviewLayout(sz)};
+
+        g_brush->SetColor(s.scrim);
+        g_rt->FillRectangle(D2D1::RectF(0.0f, 0.0f, sz.width, sz.height), g_brush);
+
+        g_brush->SetColor(s.card.fill);
+        g_rt->FillRoundedRectangle(D2D1::RoundedRect(g.card, 10.0f, 10.0f), g_brush);
+        g_brush->SetColor(s.card.border);
+        g_rt->DrawRoundedRectangle(D2D1::RoundedRect(g.card, 10.0f, 10.0f), g_brush, 1.0f);
+
+        DrawString(L"Apply changes?", g_fmtName,
+                   D2D1::RectF(g.card.left + 20.0f, g.card.top + 12.0f, g.card.right - 20.0f, g.card.top + 44.0f),
+                   s.headerText);
+
+        g_rt->PushAxisAlignedClip(g.list, D2D1_ANTIALIAS_MODE_ALIASED);
+        float y{g.list.top};
+        const auto group = [&](const wchar_t* label, const std::vector<Environ::core::EnvChange>& changes) {
+            if (changes.empty()) return;
+            DrawString(label, g_fmtHeader, D2D1::RectF(g.list.left, y, g.list.right, y + 22.0f), s.headerSubtext);
+            y += 22.0f;
+            for (const Environ::core::EnvChange& c : changes)
+            {
+                DrawString(L"    " + c.describe(), g_fmtValue,
+                           D2D1::RectF(g.list.left, y, g.list.right, y + 22.0f), s.headerText);
+                y += 22.0f;
+            }
+        };
+        group(L"USER", g_reviewUser);
+        group(L"MACHINE", g_reviewMachine);
+        g_rt->PopAxisAlignedClip();
+
+        DrawReviewButton(g.cancelBtn, L"Cancel", false, g_reviewHover == 0, s);
+        DrawReviewButton(g.applyBtn, L"Apply", true, g_reviewHover == 1, s);
+    }
+
     void Paint(HWND hwnd)
     {
         if (FAILED(EnsureRenderTarget(hwnd))) return;
@@ -219,6 +316,8 @@ namespace
             g_elevated ? L"" : L"  (machine read-only)");
         DrawString(footer, g_fmtSub,
                  D2D1::RectF(pad, sz.height - 28.0f, sz.width - pad, sz.height - 8.0f), s.headerSubtext);
+
+        if (g_reviewOpen) PaintReview(s, sz);
 
         if (g_rt->EndDraw() == D2DERR_RECREATE_TARGET)
         {
@@ -380,29 +479,48 @@ namespace
             return;
         }
 
-        const std::vector<EnvVariable> curUser{g_grid.CurrentVars(Scope::User)};
-        const std::vector<EnvVariable> curMachine{g_grid.CurrentVars(Scope::Machine)};
-
-        const std::vector<EnvChange> userChanges{compute_diff(g_grid.OriginalVars(Scope::User), curUser)};
-        const std::vector<EnvChange> machineChanges{compute_diff(g_grid.OriginalVars(Scope::Machine), curMachine)};
-        if (userChanges.empty() && machineChanges.empty())
+        g_reviewCurUser = g_grid.CurrentVars(Scope::User);
+        g_reviewCurMachine = g_grid.CurrentVars(Scope::Machine);
+        g_reviewUser = compute_diff(g_grid.OriginalVars(Scope::User), g_reviewCurUser);
+        g_reviewMachine = compute_diff(g_grid.OriginalVars(Scope::Machine), g_reviewCurMachine);
+        if (g_reviewUser.empty() && g_reviewMachine.empty())
         {
             // Edits exist per-row but net to the original values (e.g. edited back).
             MessageBoxW(hwnd, L"No effective changes to apply.", L"environ", MB_OK | MB_ICONINFORMATION);
             return;
         }
 
-        // Scope-prefixed so same-named variables (e.g. Path in both HKCU and HKLM) are unambiguous.
-        std::wstring preview{L"Apply these changes?\n\n"};
-        for (const EnvChange& c : userChanges)    { preview += L"[User] ";    preview += c.describe(); preview += L'\n'; }
-        for (const EnvChange& c : machineChanges) { preview += L"[Machine] "; preview += c.describe(); preview += L'\n'; }
-        if (MessageBoxW(hwnd, preview.c_str(), L"environ \x2014 Apply changes",
-                        MB_OKCANCEL | MB_ICONQUESTION) != IDOK)
-            return;
+        g_reviewHover = -1;
+        g_reviewOpen = true; // hand off to the themed review panel
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
 
+    void CancelReview(HWND hwnd)
+    {
+        g_reviewOpen = false;
+        InvalidateRect(hwnd, nullptr, FALSE); // edits are kept
+    }
+
+    void ApplyReviewed(HWND hwnd)
+    {
+        using namespace Environ::core;
+
+        // Re-check at the actual write point — the panel may have been open a while, and the
+        // registry could have changed underneath us since load.
+        const bool externalChange{
+            !compute_diff(g_grid.OriginalVars(Scope::User), read_variables(Scope::User)).empty() ||
+            !compute_diff(g_grid.OriginalVars(Scope::Machine), read_variables(Scope::Machine)).empty()};
+        if (externalChange &&
+            MessageBoxW(hwnd,
+                        L"The environment changed outside environ since it was loaded. "
+                        L"Applying now may overwrite those external changes.\n\nContinue?",
+                        L"environ \x2014 External change detected", MB_OKCANCEL | MB_ICONWARNING) != IDOK)
+            return; // keep the review panel open so the user can re-check or cancel
+
+        g_reviewOpen = false;
         const ApplyResult result{apply_document_changes(
-            g_grid.OriginalVars(Scope::User), curUser,
-            g_grid.OriginalVars(Scope::Machine), curMachine, g_elevated)};
+            g_grid.OriginalVars(Scope::User), g_reviewCurUser,
+            g_grid.OriginalVars(Scope::Machine), g_reviewCurMachine, g_elevated)};
 
         if (result.succeeded())
         {
@@ -421,6 +539,46 @@ namespace
 
     LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
+        // While the apply-review modal is open it owns input; paint/size/etc. fall through.
+        if (g_reviewOpen)
+        {
+            switch (msg)
+            {
+            case WM_KEYDOWN:
+                if (wp == VK_RETURN) ApplyReviewed(hwnd);
+                else if (wp == VK_ESCAPE) CancelReview(hwnd);
+                return 0;
+            case WM_MOUSEWHEEL:
+                return 0;
+            case WM_MOUSEMOVE:
+                if (g_rt)
+                {
+                    const float scale{DipScale(hwnd)};
+                    const float x{GET_X_LPARAM(lp) / scale}, my{GET_Y_LPARAM(lp) / scale};
+                    const ReviewGeom g{ReviewLayout(g_rt->GetSize())};
+                    const int hover{Contains(g.cancelBtn, x, my) ? 0 : (Contains(g.applyBtn, x, my) ? 1 : -1)};
+                    if (hover != g_reviewHover) { g_reviewHover = hover; InvalidateRect(hwnd, nullptr, FALSE); }
+                }
+                return 0;
+            case WM_LBUTTONDOWN:
+                if (g_rt)
+                {
+                    const float scale{DipScale(hwnd)};
+                    const float x{GET_X_LPARAM(lp) / scale}, my{GET_Y_LPARAM(lp) / scale};
+                    const ReviewGeom g{ReviewLayout(g_rt->GetSize())};
+                    if (Contains(g.applyBtn, x, my)) { g_eatNextDblClk = true; ApplyReviewed(hwnd); }
+                    else if (Contains(g.cancelBtn, x, my)) { g_eatNextDblClk = true; CancelReview(hwnd); }
+                    else if (!Contains(g.card, x, my)) { g_eatNextDblClk = true; CancelReview(hwnd); } // scrim = cancel
+                }
+                return 0;
+            case WM_LBUTTONUP:
+                return 0;
+            case WM_LBUTTONDBLCLK:
+                return 0; // never let a double-click reach the grid while modal
+            default:
+                break;
+            }
+        }
         switch (msg)
         {
         case WM_NCCALCSIZE:
@@ -520,6 +678,7 @@ namespace
         }
         case WM_LBUTTONDOWN:
         {
+            g_eatNextDblClk = false; // a fresh press cancels any pending dblclk-swallow
             const float scale{DipScale(hwnd)};
             RECT rc{};
             GetClientRect(hwnd, &rc);
@@ -539,6 +698,7 @@ namespace
             return 0;
         case WM_LBUTTONDBLCLK:
         {
+            if (g_eatNextDblClk) { g_eatNextDblClk = false; return 0; } // trailing dblclk of a modal close
             const float scale{DipScale(hwnd)};
             BeginEditAt(hwnd, GET_X_LPARAM(lp) / scale, GET_Y_LPARAM(lp) / scale);
             return 0;
@@ -658,7 +818,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     g_fmtValue   = MakeFormat(L"Segoe UI Variable Small", 11.5f, DWRITE_FONT_WEIGHT_NORMAL, true);
     g_fmtHeader  = MakeFormat(L"Segoe UI Variable Small", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
     g_fmtGlyph   = MakeFormat(L"Segoe Fluent Icons", 10.0f, DWRITE_FONT_WEIGHT_NORMAL, true, true);
-    if (!g_fmtCaption || !g_fmtSub || !g_fmtName || !g_fmtValue || !g_fmtHeader || !g_fmtGlyph)
+    g_fmtButton  = MakeFormat(L"Segoe UI Variable Text", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true, true);
+    if (!g_fmtCaption || !g_fmtSub || !g_fmtName || !g_fmtValue || !g_fmtHeader || !g_fmtGlyph || !g_fmtButton)
     {
         spdlog::error("text format creation failed");
         ReleaseGraphics();

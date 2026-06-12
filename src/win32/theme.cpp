@@ -67,6 +67,8 @@ namespace theme
             s.name = std::move(name);
             s.windowBg = ReadColor(t, "window_bg", base.windowBg);
             s.accent = ReadColor(t, "accent", base.accent);
+            s.accentText = ReadColor(t, "accent_text", base.accentText);
+            s.scrim = ReadColor(t, "scrim", base.scrim);
             s.headerText = ReadColor(t, "header_text", base.headerText);
             s.headerSubtext = ReadColor(t, "header_subtext", base.headerSubtext);
             s.readonlyText = ReadColor(t, "readonly_text", base.readonlyText);
@@ -90,6 +92,8 @@ namespace theme
                 .name{"dark"},
                 .windowBg{Rgb(0x1F1F1F)},
                 .accent{Rgb(0x4CC2FF)},
+                .accentText{Rgb(0x102A33)}, // dark text on the light accent
+                .scrim{Rgb(0x000000, 0.5f)},
                 .headerText{Rgb(0xF3F3F3)},
                 .headerSubtext{Rgb(0x9D9D9D)},
                 .readonlyText{Rgb(0x6E6E6E)},
@@ -112,6 +116,8 @@ namespace theme
                 .name{"light"},
                 .windowBg{Rgb(0xF3F3F3)},
                 .accent{Rgb(0x005FB8)},
+                .accentText{Rgb(0xFFFFFF)}, // white text on the dark accent
+                .scrim{Rgb(0x000000, 0.4f)},
                 .headerText{Rgb(0x1A1A1A)},
                 .headerSubtext{Rgb(0x616161)},
                 .readonlyText{Rgb(0x9A9A9A)},
@@ -134,6 +140,8 @@ namespace theme
                 .name{"blue"},
                 .windowBg{Rgb(0x0A2540)},
                 .accent{Rgb(0x59B0FF)},
+                .accentText{Rgb(0x06243B)}, // dark text on the light accent
+                .scrim{Rgb(0x000000, 0.5f)},
                 .headerText{Rgb(0xEAF2FB)},
                 .headerSubtext{Rgb(0x8FB3D9)},
                 .readonlyText{Rgb(0x6E8FB5)},

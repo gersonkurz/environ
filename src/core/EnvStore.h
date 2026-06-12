@@ -44,6 +44,13 @@ void detect_duplicates(std::vector<EnvVariable>& user_vars,
 // segment split performed by read_variables. Kept here so split and join stay symmetric.
 std::wstring join_segments(std::vector<std::wstring> const& segments);
 
+// Re-serialize an edited path-list while preserving the original separator structure
+// (empty/trailing entries that the display split drops). `edited_segments` are the visible
+// (non-empty) segments in order; each replaces the corresponding non-empty entry of
+// `original_value` in place. Falls back to join_segments() if the counts don't line up.
+std::wstring apply_segment_edits(std::wstring const& original_value,
+                                 std::vector<std::wstring> const& edited_segments);
+
 // Returns true if the current process is running elevated (admin).
 bool is_elevated();
 

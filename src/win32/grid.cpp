@@ -128,15 +128,12 @@ namespace ui
             }
         }
 
-        // Rejoin only the path-lists we actually edited, so untouched ones keep their exact
-        // original value (avoids spurious normalization diffs). join_segments lives in core,
-        // mirroring its split, so the two stay symmetric.
-        // TODO(review): the core split drops empty/trailing entries, so editing a path-list
-        // that contains them re-serializes without them (normalization the user didn't ask
-        // for). Preserve original separator structure in 3B write-hardening before relying on
-        // this for path-lists with empty entries.
+        // Re-serialize only the path-lists we actually edited; untouched ones keep their exact
+        // original value. apply_segment_edits (core) preserves the original separator structure
+        // — empty/trailing entries the display split drops — replacing only edited segments.
         for (size_t i{0}; i < result.size(); ++i)
-            if (rejoin[i]) result[i].value = Environ::core::join_segments(result[i].segments);
+            if (rejoin[i])
+                result[i].value = Environ::core::apply_segment_edits(result[i].value, result[i].segments);
         return result;
     }
 
