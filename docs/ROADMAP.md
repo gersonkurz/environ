@@ -10,7 +10,7 @@ C++/WinUI attempts failed in two different WinUI subsystems (input routing, then
 deployment — see `docs/decisions/` history / project memory). Win32 + D2D deletes
 that entire failure surface:
 
-- one self-contained exe (~300 KB), **no runtime to deploy**, instant startup
+- one self-contained exe (~900 KB with core + deps linked), **no runtime to deploy**, instant startup
 - full control over look and input — no black-box framework
 - the host-agnostic `src/core/` logic is reused unchanged
 
@@ -53,20 +53,35 @@ Gate: builds clean at `/W4 /WX`, zero warnings.
   wired to `EnvStore`, showing real user/machine vars. No editing. See `docs/PHASE-1.md`.
 - **Phase 2 — Inline editing (done).** Skinned `EDIT` cell editor, dirty tracking,
   per-segment path editing. No registry write yet. See `docs/PHASE-2.md`.
-- **Phase 3 — Apply / save (current).** `EnvWriter` apply path, dry-run review,
-  `WM_SETTINGCHANGE` broadcast (3A); themed review panel + conflict detection (3B).
-  See `docs/PHASE-3.md`.
-- **Phase 4 — Snapshots & history.** `SnapshotStore` wiring, history view, restore, diff.
-- **Phase 5 — Settings & theming UI.** In-app theme switch, custom schemes, window
-  placement persistence, and a **typography section in the theme table** (font
-  family/size/weight join colors per CLAUDE.md — currently fonts live in code).
-  UI **metrics** (caption/row height, button width) likewise move into the theme for
-  Compact/Comfortable density modes.
-- **Phase 6 — Elevation.** "Restart as Administrator" for `HKLM` editing; machine vars
+- **Phase 3 — Apply / save (done).** `EnvWriter` apply path, dry-run review,
+  `WM_SETTINGCHANGE` broadcast (3A); themed review modal, conflict detection, path-list
+  fidelity (3B). See `docs/PHASE-3.md`.
+- **Phase 4 — Editing completeness (next).** The features that make this fully replace the
+  built-in dialog:
+  - **Rename variables** — core already supports it (`EnvChange::Kind::Rename` +
+    `EnvVariable::original_name`); mainly host UI (editable name column).
+  - **Add / remove / reorder** PATH-like entries — host UI + `CurrentVars` reconstruction.
+  - **Entry info display** — expanded value, why-invalid, duplicate-of — as a tooltip or
+    detail strip. The data already exists on `EnvVariable` (`expanded_*`, `segment_valid`,
+    `segment_duplicate`).
+- **Phase 5 — Snapshots & history.** `SnapshotStore` wiring, history view, restore, diff —
+  an undo/safety net over the registry writes.
+- **Phase 6 — Settings & theming UI.** In-app theme switch, custom schemes, window
+  placement persistence, a **typography section in the theme table** (font
+  family/size/weight join colors per CLAUDE.md — currently fonts live in code), and UI
+  **metrics** (caption/row height, button width) for Compact/Comfortable density modes.
+- **Phase 7 — Elevation.** "Restart as Administrator" for `HKLM` editing; machine vars
   read-only until then.
-- **Phase 7 — Polish.** Search/filter, context menu + clipboard, rename, TOML export/import,
+- **Phase 8 — Polish.** Search/filter, context menu + clipboard, TOML export/import,
   accessibility (UIA) assessment.
 - **Cleanup (cross-cutting).** Delete retired hosts; update CLAUDE.md/memory.
+
+## Later / not yet scheduled
+- **ARM64 build** — for Windows-on-ARM (e.g. an M-series Mac under Parallels). Low effort:
+  the code is portable and the data model is identical (LLP64), so it should compile clean;
+  mainly install the MSVC ARM64 build tools and parameterize `build.ps1`
+  (`-Arch x64|arm64` → `build-<arch>/`). Today's x64 exe already runs there under emulation.
+- Window-placement persistence is folded into Phase 6 (settings).
 
 ## Review workflow
 Each phase ends at a reviewable boundary. A second Claude instance reviews the diff via
