@@ -61,6 +61,11 @@ ApplyResult apply_document_changes(
     std::vector<EnvVariable> const& current_machine,
     bool is_elevated);
 
+// Validate a scope's variables before writing: each name must be non-empty, must not
+// contain '=', and must be unique case-insensitively within the scope. Returns an empty
+// string when valid, otherwise a user-facing error message describing the first problem.
+std::wstring validate_variables(std::vector<EnvVariable> const& vars);
+
 // Generate a human-readable summary label from a list of changes.
 // E.g. "Modify GOPATH" or "Modify PATH, Add NEWVAR (+1 more)"
 std::wstring summarize_changes(std::vector<EnvChange> const& changes);

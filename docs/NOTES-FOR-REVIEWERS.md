@@ -11,22 +11,25 @@ each item as already considered — **do not re-flag it as a new finding**. Two 
 Keep this file current: when a phase lands, replace the "Current diff" section with the
 next phase's items; move resolved items out.
 
-## Current diff — Phase 3B (write-hardening + themed review)
-- **[save/trigger]** `Ctrl+S` only fires when not mid-edit (the focused `EDIT` swallows it) —
-  commit with Enter first. Forwarding `Ctrl+S` from the editor subclass is a follow-up.
-- **[save/diff]** `compute_diff` runs for the preview and again inside
-  `apply_document_changes`; kept for a clean preview/apply split (cheap, lists are small).
+## Current diff — Phase 4A (rename variables)
+- **[rename/trigger]** Double-click the **name** cell renames; double-click the value (or
+  Enter) edits the value. No rename-via-keyboard yet. Segment rows have no name.
+- **[rename/validation]** Renames are validated before review/write by core
+  `validate_variables`: empty names, names containing `=`, and case-insensitive duplicates
+  within a scope are rejected with a message and **no write happens**. `apply_document_changes`
+  also re-validates defensively (refuses to write on bad names regardless of caller). (Resolved
+  this diff, per Codex — these were gating data-loss bugs.)
+- **[rename/font]** The name editor now uses a 14 semibold GDI font to match the displayed
+  name; the value editor stays 12 normal. Two cached fonts, selected per `EditTarget::isName`.
 - **[save/expandable]** A scalar edit keeps the variable's original `REG_SZ` vs
-  `REG_EXPAND_SZ` kind — typing `%VAR%` into `REG_SZ` stays non-expanding. Value-only for now.
-- **[save/selection]** After a successful save the grid reloads, resetting selection/scroll
-  to the top. Minor; could preserve position later.
-- **[review/modal]** The review panel is modal over the content but does NOT trap the title
-  bar — the window can still be moved/resized while it's open (intentional, low-risk).
-- **[review/scroll]** The change list clips if it exceeds ~half the window height (no inner
-  scroll yet); fine for typical change counts.
-- **Resolved this diff:** path-list fidelity (now `apply_segment_edits` preserves
-  empty/trailing structure), external-change conflict detection, and the themed review panel
-  (replacing the MessageBox) are all implemented.
+  `REG_EXPAND_SZ` kind — value-only for now.
+- **[save/selection]** A successful save reloads and resets selection/scroll to the top.
+- **[review/modal]** The review modal doesn't trap the title bar (window still movable);
+  the change list clips past ~half height (no inner scroll yet).
+
+## Carried (Phase 2/3, still true, not in this diff)
+- `Ctrl+S` only when not mid-edit; preview/apply double-diff; single-click-to-edit deferred;
+  `edit.border` unused (borderless editor); review-modal scroll/title-bar notes above.
 
 ## Carried over from Phase 2 (still true, not in this diff)
 - Single-click-to-edit is deferred (edit opens on double-click / Enter / Tab).

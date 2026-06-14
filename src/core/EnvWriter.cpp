@@ -3,7 +3,9 @@
 #include <pnq/unicode.h>
 #include <spdlog/spdlog.h>
 
+#include <cwctype>
 #include <format>
+#include <unordered_set>
 
 #include <windows.h>
 
@@ -202,6 +204,26 @@ std::vector<EnvChange> compute_diff(
     return changes;
 }
 
+std::wstring validate_variables(std::vector<EnvVariable> const& vars) {
+    std::unordered_set<std::wstring> seen; // case-insensitive (lowercased) name keys
+    for (const auto& v : vars) {
+        if (v.name.empty()) {
+            return L"A variable name is empty. Names cannot be blank.";
+        }
+        if (v.name.find(L'=') != std::wstring::npos) {
+            return std::format(L"Variable name '{}' contains '=', which is not allowed.", v.name);
+        }
+        std::wstring key{v.name};
+        for (auto& ch : key) {
+            ch = static_cast<wchar_t>(std::towlower(ch));
+        }
+        if (!seen.insert(key).second) {
+            return std::format(L"Two variables are named '{}' in the same scope.", v.name);
+        }
+    }
+    return {};
+}
+
 std::wstring apply_changes(Scope scope, std::vector<EnvChange> const& changes) {
     // Defensive: never touch HKLM unelevated, even if called directly (not via
     // apply_document_changes, which also checks).
@@ -254,6 +276,15 @@ ApplyResult apply_document_changes(
     bool const is_elevated) {
 
     ApplyResult result;
+
+    // Defensive: refuse to write if any name is invalid (empty / contains '=' / duplicate),
+    // even if a caller skipped the host-side check. No diffs, no writes, no broadcast.
+    result.user.error = validate_variables(current_user);
+    result.machine.error = validate_variables(current_machine);
+    if (!result.succeeded()) {
+        return result;
+    }
+
     result.user.changes = compute_diff(original_user, current_user);
     result.machine.changes = compute_diff(original_machine, current_machine);
 

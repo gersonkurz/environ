@@ -40,6 +40,7 @@ namespace ui
         m_hover = -1;
         m_selected = -1;
         m_editing = -1;
+        m_editingName = false;
 
         const auto addGroup = [&](const std::vector<EnvVariable>& vars, Scope scope, bool readOnly) {
             for (int vi{0}; vi < static_cast<int>(vars.size()); ++vi)
@@ -48,6 +49,7 @@ namespace ui
                 Row var{};
                 var.kind = Row::Kind::Variable;
                 var.col1 = v.name;
+                var.col1Original = v.name;
                 var.depth = 0;
                 var.readOnly = readOnly;
                 var.scope = scope;
@@ -95,7 +97,8 @@ namespace ui
     bool Grid::HasChanges() const
     {
         for (const Row& r : m_rows)
-            if (r.col2 != r.original) return true;
+            if (r.col2 != r.original || (r.kind == Row::Kind::Variable && r.col1 != r.col1Original))
+                return true;
         return false;
     }
 
@@ -113,9 +116,18 @@ namespace ui
 
         for (const Row& r : m_rows)
         {
-            if (r.scope != scope || r.col2 == r.original) continue; // only edited rows of this scope
+            if (r.scope != scope) continue;
             if (r.varIndex < 0 || r.varIndex >= static_cast<int>(result.size())) continue;
             EnvVariable& v{result[static_cast<size_t>(r.varIndex)]};
+
+            // Rename: set new name + original_name so compute_diff emits a Rename.
+            if (r.kind == Row::Kind::Variable && r.col1 != r.col1Original)
+            {
+                v.original_name = r.col1Original;
+                v.name = r.col1;
+            }
+
+            if (r.col2 == r.original) continue; // value/segment unchanged
             if (v.kind == EnvVariableKind::PathList && r.segIndex >= 0
                 && r.segIndex < static_cast<int>(v.segments.size()))
             {
@@ -186,6 +198,13 @@ namespace ui
         return D2D1::RectF(lay.data.left + kPad + NameColWidth(), top, rightEdge - kPad, top + m_rowH);
     }
 
+    D2D1_RECT_F Grid::NameCellRect(int row) const
+    {
+        const Layout lay{Compute()};
+        const float top = lay.data.top + static_cast<float>(row) * m_rowH - m_scrollY;
+        return D2D1::RectF(lay.data.left + kPad, top, lay.data.left + NameColWidth(), top + m_rowH);
+    }
+
     bool Grid::SelectionEditable() const
     {
         return m_selected >= 0 && m_selected < static_cast<int>(m_rows.size())
@@ -197,17 +216,25 @@ namespace ui
         if (!SelectionEditable()) return std::nullopt;
         EnsureVisible(m_selected);
         m_editing = m_selected;
-        return EditTarget{ValueCellRect(m_selected), m_rows[static_cast<size_t>(m_selected)].col2};
+        m_editingName = false; // Enter edits the value
+        return EditTarget{ValueCellRect(m_selected), m_rows[static_cast<size_t>(m_selected)].col2, false};
     }
 
     void Grid::CommitEdit(const std::wstring& text)
     {
         if (m_editing < 0) return;
         Row& r = m_rows[static_cast<size_t>(m_editing)];
-        r.col2 = text;
-        // Validity/duplicate flags are stale once edited; recomputed at save (Phase 3).
-        r.invalid = false;
-        r.duplicate = false;
+        if (m_editingName)
+        {
+            r.col1 = text;
+        }
+        else
+        {
+            r.col2 = text;
+            // Validity/duplicate flags are stale once edited; recomputed at save.
+            r.invalid = false;
+            r.duplicate = false;
+        }
         m_editing = -1;
     }
 
@@ -222,9 +249,25 @@ namespace ui
         const int row{RowAtPoint(lay, x, y)};
         if (row < 0) return std::nullopt;
         m_selected = row; // selection moves on any row double-click
-        const D2D1_RECT_F cell{ValueCellRect(row)};
-        if (x < cell.left || x >= cell.right) return std::nullopt; // double-click must hit the value
-        return BeginEdit(); // returns nullopt if the row is read-only
+        const Row& r{m_rows[static_cast<size_t>(row)]};
+        if (r.readOnly) return std::nullopt;
+
+        // Name column (Variable rows only) → rename; value column → value.
+        if (r.kind == Row::Kind::Variable)
+        {
+            const D2D1_RECT_F nameCell{NameCellRect(row)};
+            if (x >= nameCell.left && x < nameCell.right)
+            {
+                m_editing = row;
+                m_editingName = true;
+                return EditTarget{nameCell, r.col1, true};
+            }
+        }
+        const D2D1_RECT_F valueCell{ValueCellRect(row)};
+        if (x < valueCell.left || x >= valueCell.right) return std::nullopt;
+        m_editing = row;
+        m_editingName = false;
+        return EditTarget{valueCell, r.col2, false};
     }
 
     bool Grid::SelectNextEditable(int dir)
@@ -290,7 +333,8 @@ namespace ui
             const Row& r{m_rows[static_cast<size_t>(i)]};
             const bool selected = (i == m_selected);
             const bool hovered = (i == m_hover && !selected);
-            const bool dirty = (r.col2 != r.original);
+            const bool valueDirty = (r.col2 != r.original);
+            const bool nameDirty = (r.kind == Row::Kind::Variable && r.col1 != r.col1Original);
             const D2D1_RECT_F rowRect = D2D1::RectF(lay.data.left, y, rightEdge, y + m_rowH);
 
             // Fill (selection / hover win; then per-segment state; then base row).
@@ -298,7 +342,7 @@ namespace ui
             if (selected)        fill = s.rowSelected.fill;
             else if (hovered)    fill = s.rowHover.fill;
             else if (r.invalid)  fill = s.rowInvalid.fill;
-            else if (dirty)      fill = s.rowDirty.fill;
+            else if (valueDirty || nameDirty) fill = s.rowDirty.fill;
             else if (r.duplicate)fill = s.rowDuplicate.fill;
             brush->SetColor(fill);
             rt->FillRectangle(rowRect, brush);
@@ -311,9 +355,10 @@ namespace ui
                                   brush, s.rowInvalid.borderWidth);
             }
 
-            // The name column never takes a path-state color (the name isn't a path).
+            // The name column reflects rename-dirty (not path state — the name isn't a path).
             D2D1_COLOR_F nameColor{s.row.text};
-            if (selected)        nameColor = s.rowSelected.text;
+            if (nameDirty)       nameColor = s.rowDirty.text;
+            else if (selected)   nameColor = s.rowSelected.text;
             else if (r.readOnly) nameColor = s.readonlyText;
             else if (hovered)    nameColor = s.rowHover.text;
 
@@ -322,7 +367,7 @@ namespace ui
             // visibly shows its changed state.
             D2D1_COLOR_F valueColor{s.row.text};
             if (r.invalid)        valueColor = s.rowInvalid.text;
-            else if (dirty)       valueColor = s.rowDirty.text;
+            else if (valueDirty)  valueColor = s.rowDirty.text;
             else if (selected)    valueColor = s.rowSelected.text;
             else if (r.duplicate) valueColor = s.rowDuplicate.text;
             else if (r.readOnly)  valueColor = s.readonlyText;

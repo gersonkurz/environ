@@ -50,6 +50,7 @@ namespace ui
         {
             D2D1_RECT_F cell;
             std::wstring text;
+            bool isName{false}; // editing the name cell (host uses the heavier name font)
         };
         bool SelectionEditable() const;
         std::optional<EditTarget> BeginEdit();             // edit the current selection
@@ -71,7 +72,8 @@ namespace ui
             enum class Kind { Variable, Segment } kind;
             std::wstring col1;          // variable name (Variable rows)
             std::wstring col2;          // scalar value / first-segment / segment path
-            std::wstring original;      // initial col2, for dirty detection
+            std::wstring original;      // initial col2, for value-dirty detection
+            std::wstring col1Original;  // initial name (Variable rows), for rename-dirty detection
             int depth;                  // 0 = variable, 1 = segment
             bool readOnly;              // machine var, unelevated
             bool invalid;               // segment path missing
@@ -96,6 +98,7 @@ namespace ui
         Layout Compute() const;
         float NameColWidth() const;
         D2D1_RECT_F ValueCellRect(int row) const;
+        D2D1_RECT_F NameCellRect(int row) const;
         int RowAtPoint(const Layout& lay, float x, float y) const;
         void EnsureVisible(int row);
         void ClampScroll();
@@ -111,6 +114,7 @@ namespace ui
         int m_hover{-1};
         int m_selected{-1};
         int m_editing{-1};
+        bool m_editingName{false}; // true = editing the name cell, false = the value cell
         bool m_draggingThumb{false};
         float m_dragGrabOffset{0.0f};
     };

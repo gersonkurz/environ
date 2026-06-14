@@ -71,7 +71,8 @@ namespace
     int g_capHover{-1}; // 0 = min, 1 = max, 2 = close, -1 = none
 
     HWND g_edit{nullptr};       // inline cell editor (skinned standard EDIT)
-    HFONT g_editFont{nullptr};
+    HFONT g_editFont{nullptr};     // value cell (12, normal)
+    HFONT g_editFontName{nullptr}; // name cell (14, semibold) — matches the displayed name
     HBRUSH g_editBrush{nullptr}; // for WM_CTLCOLOREDIT
 
     // Apply-review modal state (Phase 3B). When open, the grid is inert and the panel owns input.
@@ -130,12 +131,18 @@ namespace
     void RefreshEditFont(HWND hwnd)
     {
         if (!g_edit) return;
+        const float scale{DipScale(hwnd)};
+        const auto px = [scale](float dip) { return static_cast<int>(dip * scale); };
         if (g_editFont) DeleteObject(g_editFont);
-        const int h{static_cast<int>(12.0f * DipScale(hwnd))};
-        g_editFont = CreateFontW(-h, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        if (g_editFontName) DeleteObject(g_editFontName);
+        // Value font matches the value column (12, normal); name font matches the name
+        // column (14, semibold). PositionEditor selects one per edit.
+        g_editFont = CreateFontW(-px(12.0f), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
-        SendMessageW(g_edit, WM_SETFONT, reinterpret_cast<WPARAM>(g_editFont), TRUE);
+        g_editFontName = CreateFontW(-px(14.0f), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                     CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
     }
 
     void DiscardDeviceResources()
@@ -424,13 +431,16 @@ namespace
         const auto px = [scale](float dip) { return static_cast<int>(dip * scale); };
         const D2D1_RECT_F& c{target.cell};
 
-        // Font + margins are set once in EnsureEditControl (and on DPI change). Here we only
-        // size and place the control: a single-line EDIT top-aligns its text, so make it
-        // exactly one line tall (from the font metrics) and center that in the cell.
+        // Pick the cached font matching the field being edited (name = heavier, like its
+        // display), then size the control to exactly one line and center it: a single-line
+        // EDIT top-aligns its text, so a one-line-tall control lands it on the cell center.
+        HFONT font{target.isName ? g_editFontName : g_editFont};
+        SendMessageW(g_edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+
         TEXTMETRICW tm{};
         if (const HDC dc{GetDC(g_edit)})
         {
-            const HGDIOBJ prev{SelectObject(dc, g_editFont)};
+            const HGDIOBJ prev{SelectObject(dc, font)};
             GetTextMetricsW(dc, &tm);
             SelectObject(dc, prev);
             ReleaseDC(g_edit, dc);
@@ -481,6 +491,18 @@ namespace
 
         g_reviewCurUser = g_grid.CurrentVars(Scope::User);
         g_reviewCurMachine = g_grid.CurrentVars(Scope::Machine);
+
+        // Reject invalid renames (empty / '=' / case-insensitive duplicate) before any review
+        // or write — a rename to an existing name would otherwise delete one and overwrite the
+        // other; an empty name would silently vanish on reload.
+        std::wstring invalid{validate_variables(g_reviewCurUser)};
+        if (invalid.empty()) invalid = validate_variables(g_reviewCurMachine);
+        if (!invalid.empty())
+        {
+            MessageBoxW(hwnd, invalid.c_str(), L"environ \x2014 Cannot apply", MB_OK | MB_ICONERROR);
+            return;
+        }
+
         g_reviewUser = compute_diff(g_grid.OriginalVars(Scope::User), g_reviewCurUser);
         g_reviewMachine = compute_diff(g_grid.OriginalVars(Scope::Machine), g_reviewCurMachine);
         if (g_reviewUser.empty() && g_reviewMachine.empty())
@@ -759,7 +781,8 @@ namespace
         }
         case WM_DESTROY:
             if (g_editBrush) { DeleteObject(g_editBrush); g_editBrush = nullptr; }
-            if (g_editFont)  { DeleteObject(g_editFont);  g_editFont = nullptr; }
+            if (g_editFont)     { DeleteObject(g_editFont);     g_editFont = nullptr; }
+            if (g_editFontName) { DeleteObject(g_editFontName); g_editFontName = nullptr; }
             ReleaseGraphics();
             PostQuitMessage(0);
             return 0;
