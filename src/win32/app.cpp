@@ -318,7 +318,7 @@ namespace
                      D2D1::RectF(pad, kCaptionH + 8.0f, sz.width - pad, sz.height - 34.0f));
 
         const std::wstring footer = std::format(
-            L"{}   \x2022   {} user, {} machine{}   \x2022   Ctrl+S apply   \x2022   F1 dark  F2 light  F3 blue",
+            L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+S apply   \x2022   F1/F2/F3 theme",
             std::wstring(s.name.begin(), s.name.end()), g_userCount, g_machineCount,
             g_elevated ? L"" : L"  (machine read-only)");
         DrawString(footer, g_fmtSub,
@@ -646,10 +646,24 @@ namespace
                 return CaptionButtonAt(xDip, yDip, wDip) >= 0 ? HTCLIENT : HTCAPTION;
             return HTCLIENT;
         }
+        case WM_SYSKEYDOWN:
+            // Alt+Up / Alt+Down move the selected path entry (Alt combos arrive here).
+            if ((wp == VK_UP || wp == VK_DOWN) && (lp & (1 << 29)))
+            {
+                if (g_grid.MoveEntry(wp == VK_UP ? -1 : 1)) InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
+            break; // DefWindowProc handles other system keys (Alt+F4, Alt+Space, ...)
         case WM_KEYDOWN:
         {
             if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(hwnd); return 0; }
             if (wp == VK_RETURN) { BeginEditFromGrid(hwnd); return 0; }
+            if (wp == VK_INSERT) // add a path entry and edit it
+            {
+                if (g_grid.AddEntry()) { InvalidateRect(hwnd, nullptr, FALSE); BeginEditFromGrid(hwnd); }
+                return 0;
+            }
+            if (wp == VK_DELETE) { Repaint(hwnd, g_grid.RemoveEntry()); return 0; }
             const char* want{nullptr};
             if (wp == VK_F1) want = "dark";
             else if (wp == VK_F2) want = "light";

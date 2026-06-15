@@ -11,25 +11,32 @@ each item as already considered — **do not re-flag it as a new finding**. Two 
 Keep this file current: when a phase lands, replace the "Current diff" section with the
 next phase's items; move resolved items out.
 
-## Current diff — Phase 4A (rename variables)
-- **[rename/trigger]** Double-click the **name** cell renames; double-click the value (or
-  Enter) edits the value. No rename-via-keyboard yet. Segment rows have no name.
-- **[rename/validation]** Renames are validated before review/write by core
-  `validate_variables`: empty names, names containing `=`, and case-insensitive duplicates
-  within a scope are rejected with a message and **no write happens**. `apply_document_changes`
-  also re-validates defensively (refuses to write on bad names regardless of caller). (Resolved
-  this diff, per Codex — these were gating data-loss bugs.)
-- **[rename/font]** The name editor now uses a 14 semibold GDI font to match the displayed
-  name; the value editor stays 12 normal. Two cached fonts, selected per `EditTarget::isName`.
-- **[save/expandable]** A scalar edit keeps the variable's original `REG_SZ` vs
-  `REG_EXPAND_SZ` kind — value-only for now.
-- **[save/selection]** A successful save reloads and resets selection/scroll to the top.
-- **[review/modal]** The review modal doesn't trap the title bar (window still movable);
-  the change list clips past ~half height (no inner scroll yet).
+## Current diff — Phase 4B (add / remove / reorder PATH entries)
+- **[entry/trigger]** Keyboard only (chosen): `Insert` adds a blank entry below the selection
+  and opens its editor; `Delete` removes it; `Alt+Up`/`Alt+Down` move it (via `WM_SYSKEYDOWN`).
+  Ignored on scalars, the header, and read-only machine rows. Themed context menu is Phase 8.
+- **[entry/first]** Removing the first entry (on the variable row, which also holds the name)
+  promotes the next entry into it; removing the last leaves an empty value (on reload such a
+  variable reclassifies as a scalar — fine).
+- **[entry/reserialize]** `CurrentVars` rebuilds each variable from its **contiguous block of
+  rows in display order** (the ops preserve block contiguity). Structurally-edited path-lists
+  get a clean `join_segments` (original empty/trailing structure intentionally dropped — the
+  user restructured); in-place-only path-lists still use `apply_segment_edits`; untouched ones
+  keep their exact value.
+- **[entry/dirty]** A structurally-edited variable marks *all* its rows amber (even rows whose
+  text didn't change, e.g. after a reorder or a blank insert) — a deliberate "this var changed"
+  signal. Tracked by per-variable `m_userStruct`/`m_machineStruct`, reset on reload.
+- **[entry/empty-seg]** An added-but-unedited entry is an empty path segment; `validate_variables`
+  only rejects empty/`=`/duplicate variable **names**, not empty path entries, so it's written
+  as-is. Intentional (you can have a trailing entry); not a name-validation case.
+- **[entry/scalar]** A scalar variable can't gain entries (Insert no-ops on scalars) — turning a
+  scalar into a path-list isn't supported yet.
 
-## Carried (Phase 2/3, still true, not in this diff)
-- `Ctrl+S` only when not mid-edit; preview/apply double-diff; single-click-to-edit deferred;
-  `edit.border` unused (borderless editor); review-modal scroll/title-bar notes above.
+## Carried (Phase 2/3/4A, still true, not in this diff)
+- Rename: double-click the name cell; validated (empty/`=`/duplicate) before any write, in host
+  and defensively in `apply_document_changes`. `Ctrl+S` only when not mid-edit; preview/apply
+  double-diff; scalar edits keep original `REG_SZ`/`REG_EXPAND_SZ`; save resets selection/scroll;
+  single-click-to-edit deferred; review modal doesn't trap the title bar / list clips past ~half.
 
 ## Carried over from Phase 2 (still true, not in this diff)
 - Single-click-to-edit is deferred (edit opens on double-click / Enter / Tab).

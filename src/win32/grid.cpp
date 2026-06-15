@@ -35,6 +35,8 @@ namespace ui
 
         m_userOrig = userVars;
         m_machineOrig = machineVars;
+        m_userStruct.assign(userVars.size(), false);
+        m_machineStruct.assign(machineVars.size(), false);
         m_rows.clear();
         m_scrollY = 0.0f;
         m_hover = -1;
@@ -96,6 +98,8 @@ namespace ui
 
     bool Grid::HasChanges() const
     {
+        for (bool f : m_userStruct) if (f) return true;       // added/removed/reordered entries
+        for (bool f : m_machineStruct) if (f) return true;
         for (const Row& r : m_rows)
             if (r.col2 != r.original || (r.kind == Row::Kind::Variable && r.col1 != r.col1Original))
                 return true;
@@ -112,40 +116,58 @@ namespace ui
         using Environ::core::EnvVariable;
         using Environ::core::EnvVariableKind;
         std::vector<EnvVariable> result{(scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig};
-        std::vector<bool> rejoin(result.size(), false); // parens: brace-init would pick the initializer_list ctor
+        const std::vector<bool>& structEdited{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
 
-        for (const Row& r : m_rows)
+        // Reconstruct each variable from its contiguous block of rows in display order: the
+        // variable row holds the name (and the first entry), segment rows hold the rest.
+        for (size_t i{0}; i < m_rows.size();)
         {
-            if (r.scope != scope) continue;
-            if (r.varIndex < 0 || r.varIndex >= static_cast<int>(result.size())) continue;
-            EnvVariable& v{result[static_cast<size_t>(r.varIndex)]};
+            if (m_rows[i].scope != scope) { ++i; continue; }
+            const int vi{m_rows[i].varIndex};
 
-            // Rename: set new name + original_name so compute_diff emits a Rename.
-            if (r.kind == Row::Kind::Variable && r.col1 != r.col1Original)
+            std::wstring name;
+            std::wstring nameOriginal;
+            std::vector<std::wstring> entries;
+            size_t j{i};
+            for (; j < m_rows.size() && m_rows[j].scope == scope && m_rows[j].varIndex == vi; ++j)
             {
-                v.original_name = r.col1Original;
-                v.name = r.col1;
+                if (m_rows[j].kind == Row::Kind::Variable)
+                {
+                    name = m_rows[j].col1;
+                    nameOriginal = m_rows[j].col1Original;
+                }
+                entries.push_back(m_rows[j].col2);
+            }
+            i = j;
+
+            if (vi < 0 || vi >= static_cast<int>(result.size())) continue;
+            EnvVariable& v{result[static_cast<size_t>(vi)]};
+
+            if (name != nameOriginal) // rename: compute_diff turns original_name into a Rename
+            {
+                v.original_name = nameOriginal;
+                v.name = name;
             }
 
-            if (r.col2 == r.original) continue; // value/segment unchanged
-            if (v.kind == EnvVariableKind::PathList && r.segIndex >= 0
-                && r.segIndex < static_cast<int>(v.segments.size()))
+            if (v.kind != EnvVariableKind::PathList)
             {
-                v.segments[static_cast<size_t>(r.segIndex)] = r.col2;
-                rejoin[static_cast<size_t>(r.varIndex)] = true;
+                v.value = entries.empty() ? std::wstring{} : entries.front(); // scalar
+                continue;
+            }
+
+            v.segments = entries;
+            if (structEdited[static_cast<size_t>(vi)])
+            {
+                // Added / removed / reordered → clean re-join (original structure no longer applies).
+                v.value = Environ::core::join_segments(entries);
             }
             else
             {
-                v.value = r.col2; // scalar
+                // In-place edits only → preserve the original separator structure (empty/trailing
+                // entries the display split drops); untouched entries reproduce the original value.
+                v.value = Environ::core::apply_segment_edits(v.value, entries);
             }
         }
-
-        // Re-serialize only the path-lists we actually edited; untouched ones keep their exact
-        // original value. apply_segment_edits (core) preserves the original separator structure
-        // — empty/trailing entries the display split drops — replacing only edited segments.
-        for (size_t i{0}; i < result.size(); ++i)
-            if (rejoin[i])
-                result[i].value = Environ::core::apply_segment_edits(result[i].value, result[i].segments);
         return result;
     }
 
@@ -243,6 +265,91 @@ namespace ui
         m_editing = -1;
     }
 
+    bool Grid::SelectedIsPathEntry() const
+    {
+        if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size())) return false;
+        const Row& r{m_rows[static_cast<size_t>(m_selected)]};
+        if (r.readOnly) return false;
+        const std::vector<Environ::core::EnvVariable>& orig{
+            (r.scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig};
+        return r.varIndex >= 0 && r.varIndex < static_cast<int>(orig.size())
+            && orig[static_cast<size_t>(r.varIndex)].kind == Environ::core::EnvVariableKind::PathList;
+    }
+
+    bool Grid::AddEntry()
+    {
+        if (!SelectedIsPathEntry()) return false;
+        const Environ::core::Scope scope{m_rows[static_cast<size_t>(m_selected)].scope};
+        const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
+
+        Row entry{};
+        entry.kind = Row::Kind::Segment;
+        entry.depth = 1;
+        entry.scope = scope;
+        entry.varIndex = vi;
+        m_rows.insert(m_rows.begin() + m_selected + 1, entry);
+        m_selected += 1; // select the new (blank) entry so the host can edit it
+
+        std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
+        if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
+        EnsureVisible(m_selected);
+        return true;
+    }
+
+    bool Grid::RemoveEntry()
+    {
+        if (!SelectedIsPathEntry()) return false;
+        const Environ::core::Scope scope{m_rows[static_cast<size_t>(m_selected)].scope};
+        const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
+
+        if (m_rows[static_cast<size_t>(m_selected)].kind == Row::Kind::Segment)
+        {
+            m_rows.erase(m_rows.begin() + m_selected);
+            if (m_selected >= static_cast<int>(m_rows.size())) m_selected = static_cast<int>(m_rows.size()) - 1;
+        }
+        else
+        {
+            // Variable row holds the first entry (and the name): promote the next entry into it,
+            // or blank it if this was the last entry.
+            const size_t next{static_cast<size_t>(m_selected) + 1};
+            if (next < m_rows.size() && m_rows[next].scope == scope && m_rows[next].varIndex == vi
+                && m_rows[next].kind == Row::Kind::Segment)
+            {
+                m_rows[static_cast<size_t>(m_selected)].col2 = m_rows[next].col2;
+                m_rows.erase(m_rows.begin() + static_cast<long long>(next));
+            }
+            else
+            {
+                m_rows[static_cast<size_t>(m_selected)].col2.clear();
+            }
+        }
+
+        std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
+        if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
+        ClampScroll();
+        return true;
+    }
+
+    bool Grid::MoveEntry(int dir)
+    {
+        if (!SelectedIsPathEntry()) return false;
+        const int other{m_selected + dir};
+        if (other < 0 || other >= static_cast<int>(m_rows.size())) return false;
+        const Environ::core::Scope scope{m_rows[static_cast<size_t>(m_selected)].scope};
+        const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
+        if (m_rows[static_cast<size_t>(other)].scope != scope
+            || m_rows[static_cast<size_t>(other)].varIndex != vi)
+            return false; // can't move across variables
+
+        std::swap(m_rows[static_cast<size_t>(m_selected)].col2, m_rows[static_cast<size_t>(other)].col2);
+        m_selected = other; // selection follows the moved entry
+
+        std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
+        if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
+        EnsureVisible(m_selected);
+        return true;
+    }
+
     std::optional<Grid::EditTarget> Grid::BeginEditAt(float x, float y)
     {
         const Layout lay{Compute()};
@@ -333,7 +440,10 @@ namespace ui
             const Row& r{m_rows[static_cast<size_t>(i)]};
             const bool selected = (i == m_selected);
             const bool hovered = (i == m_hover && !selected);
-            const bool valueDirty = (r.col2 != r.original);
+            const std::vector<bool>& sf{(r.scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
+            const bool varStruct{r.varIndex >= 0 && r.varIndex < static_cast<int>(sf.size())
+                                 && sf[static_cast<size_t>(r.varIndex)]};
+            const bool valueDirty = (r.col2 != r.original) || varStruct;
             const bool nameDirty = (r.kind == Row::Kind::Variable && r.col1 != r.col1Original);
             const D2D1_RECT_F rowRect = D2D1::RectF(lay.data.left, y, rightEdge, y + m_rowH);
 

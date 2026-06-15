@@ -13,12 +13,19 @@ reviewable increments. Saving still flows through Phase 3's review modal + `EnvW
   `compute_diff` emits an `EnvChange::Kind::Rename` (core already supports this end-to-end).
 - Read-only (machine, unelevated) rows are not renamable.
 
-## 4B — Add / remove / reorder PATH entries (next)
-- Insert a new segment, delete a segment, move up/down within a path-list variable.
-- `CurrentVars` reconstruction handles structural changes (added/removed segments) — the
-  `apply_segment_edits` structure-preservation only covers in-place edits, so additions/
-  removals need their own path.
-- Likely needs a small per-row action affordance (context menu or inline buttons) — design TBD.
+## 4B — Add / remove / reorder PATH entries (this increment)
+- **Keyboard triggers** (chosen): `Insert` = add a blank entry after the selection and edit
+  it; `Delete` = remove the selected entry; `Alt+Up` / `Alt+Down` = move it (the latter via
+  `WM_SYSKEYDOWN`). Only on path-list entries; read-only rows excluded. Footer hints the keys.
+- **Model:** `CurrentVars` is reworked to reconstruct each variable from its **block of rows
+  in display order** (the variable row + its segment rows), handling rename, in-place edits,
+  and structural changes uniformly. A per-variable "structurally edited" flag selects the
+  serialization: structurally-edited path-lists get a clean `join_segments`; in-place-only
+  ones keep `apply_segment_edits` (preserving original empty/trailing structure); untouched
+  ones keep their exact original value.
+- Removing the first entry (on the variable row) promotes the next entry into it; moving
+  swaps entry text between adjacent rows of the same variable so the name stays put.
+- A themed context menu is still a later (Phase 8) nicety.
 
 ## 4C — Entry info display (next)
 - Surface the data `EnvStore` already computes: the **expanded value** (`expanded_value` /

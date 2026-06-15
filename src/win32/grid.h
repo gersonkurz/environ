@@ -59,6 +59,14 @@ namespace ui
         void CommitEdit(const std::wstring& text);         // write back + mark dirty
         void CancelEdit();
 
+        // Structural editing of a path-list (keyboard-driven). Each returns true if the grid
+        // changed (host should repaint). AddEntry selects the new blank row so the host can
+        // open its editor.
+        bool SelectedIsPathEntry() const; // selection is an editable path-list entry
+        bool AddEntry();                   // insert a blank entry after the selection
+        bool RemoveEntry();                // remove the selected entry
+        bool MoveEntry(int dir);           // move the entry up (-1) / down (+1) within its variable
+
         // Save support: the originals as loaded, and the current (edited) state rebuilt
         // from the rows. Used by the host with core EnvWriter.
         bool HasChanges() const;
@@ -106,6 +114,9 @@ namespace ui
         std::vector<Row> m_rows;
         std::vector<Environ::core::EnvVariable> m_userOrig;
         std::vector<Environ::core::EnvVariable> m_machineOrig;
+        // Per-variable "structurally edited" (add/remove/reorder) flags, by scope + varIndex.
+        std::vector<bool> m_userStruct;
+        std::vector<bool> m_machineStruct;
         D2D1_RECT_F m_bounds{};
         float m_rowH{30.0f};
         float m_headerH{32.0f};
