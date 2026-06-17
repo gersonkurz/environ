@@ -162,9 +162,7 @@ std::vector<EnvVariable> read_variables(Scope scope) {
 
 void expand_and_validate(std::vector<EnvVariable>& variables) {
     for (auto& var : variables) {
-        var.expanded_value = var.is_expandable
-            ? expand_env_string(var.value)
-            : var.value;
+        var.expanded_value = expand_env_string(var.value);
 
         if (var.kind == EnvVariableKind::PathList) {
             var.expanded_segments.clear();
@@ -173,7 +171,7 @@ void expand_and_validate(std::vector<EnvVariable>& variables) {
             var.segment_valid.reserve(var.segments.size());
 
             for (const auto& seg : var.segments) {
-                auto expanded{var.is_expandable ? expand_env_string(seg) : seg};
+                auto expanded{expand_env_string(seg)};
                 var.segment_valid.push_back(path_exists(expanded));
                 var.expanded_segments.push_back(std::move(expanded));
             }

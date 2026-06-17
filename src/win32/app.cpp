@@ -315,7 +315,37 @@ namespace
         DrawCaption(s, sz.width);
 
         g_grid.Paint(g_rt, g_brush, ui::GridFonts{g_fmtName, g_fmtValue, g_fmtHeader}, s,
-                     D2D1::RectF(pad, kCaptionH + 8.0f, sz.width - pad, sz.height - 34.0f));
+                     D2D1::RectF(pad, kCaptionH + 8.0f, sz.width - pad, sz.height - 56.0f));
+
+        // Detail strip: expanded path / validity / duplicate info for the selected row.
+        if (const auto detail{g_grid.GetSelectionDetail()})
+        {
+            std::wstring text;
+            D2D1_COLOR_F color{s.headerSubtext};
+
+            if (!detail->valid)
+            {
+                text = L"\x2717 " + detail->expandedPath + L" \x2014 path not found";
+                color = s.rowInvalid.text;
+            }
+            else if (!detail->duplicateDesc.empty())
+            {
+                text = L"\x2192 " + detail->expandedPath + L" \x2014 " + detail->duplicateDesc;
+                color = s.rowDuplicate.text;
+            }
+            else if (detail->expandedPath != detail->displayPath)
+            {
+                text = L"\x2192 " + detail->expandedPath;
+            }
+            // else: expanded == display → nothing to show
+
+            if (!text.empty())
+            {
+                DrawString(text, g_fmtSub,
+                           D2D1::RectF(pad, sz.height - 52.0f, sz.width - pad, sz.height - 32.0f),
+                           color);
+            }
+        }
 
         const std::wstring footer = std::format(
             L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+S apply   \x2022   F1/F2/F3 theme",

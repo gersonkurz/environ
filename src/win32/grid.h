@@ -67,6 +67,17 @@ namespace ui
         bool RemoveEntry();                // remove the selected entry
         bool MoveEntry(int dir);           // move the entry up (-1) / down (+1) within its variable
 
+        // Detail strip: info about the currently selected row for display below the grid.
+        struct SelectionDetail
+        {
+            std::wstring expandedPath;   // expanded form of segment or scalar value
+            std::wstring displayPath;    // raw display text (col2)
+            std::wstring duplicateDesc;  // "duplicate in Machine:PATH" or empty
+            bool valid{true};            // false = path not found
+            bool isSegment{true};        // true = path-list entry, false = scalar
+        };
+        std::optional<SelectionDetail> GetSelectionDetail() const;
+
         // Save support: the originals as loaded, and the current (edited) state rebuilt
         // from the rows. Used by the host with core EnvWriter.
         bool HasChanges() const;

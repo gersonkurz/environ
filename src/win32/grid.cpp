@@ -106,6 +106,41 @@ namespace ui
         return false;
     }
 
+    std::optional<Grid::SelectionDetail> Grid::GetSelectionDetail() const
+    {
+        if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size()))
+            return std::nullopt;
+
+        const Row& r{m_rows[static_cast<size_t>(m_selected)]};
+
+        // Suppress stale data when the row has been edited.
+        if (r.col2 != r.original) return std::nullopt;
+
+        const auto& orig{(r.scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig};
+        if (r.varIndex < 0 || r.varIndex >= static_cast<int>(orig.size()))
+            return std::nullopt;
+
+        const Environ::core::EnvVariable& v{orig[static_cast<size_t>(r.varIndex)]};
+        SelectionDetail d{};
+        d.displayPath = r.col2;
+
+        if (r.segIndex >= 0) // path-list segment
+        {
+            const auto si{static_cast<size_t>(r.segIndex)};
+            d.isSegment = true;
+            d.expandedPath = (si < v.expanded_segments.size()) ? v.expanded_segments[si] : r.col2;
+            d.valid = (si < v.segment_valid.size()) ? v.segment_valid[si] : true;
+            d.duplicateDesc = (si < v.segment_duplicate.size()) ? v.segment_duplicate[si] : std::wstring{};
+        }
+        else // scalar
+        {
+            d.isSegment = false;
+            d.expandedPath = v.expanded_value;
+            d.valid = true;
+        }
+        return d;
+    }
+
     const std::vector<Environ::core::EnvVariable>& Grid::OriginalVars(Environ::core::Scope scope) const
     {
         return (scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig;
