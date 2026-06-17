@@ -1,17 +1,28 @@
 # Self-bootstrapping build for the pure-Win32 host.
 # Locates VS18 and imports its dev environment every run, so it works from any
-# shell with no dev prompt required. Builds src/win32/*.cpp -> build-win32/environ.exe
+# shell with no dev prompt required. Builds src/win32/*.cpp -> build-{arch}/environ.exe
 #
-#   .\build.ps1            build
-#   .\build.ps1 -Run       build, then launch (you judge the look)
-#   .\build.ps1 -Clean     wipe output first
+#   .\build.ps1                build (native arch)
+#   .\build.ps1 -Arch arm64   cross-compile for ARM64
+#   .\build.ps1 -Run           build + launch
+#   .\build.ps1 -Clean         wipe output first
 [CmdletBinding()]
-param([switch]$Run, [switch]$Clean)
+param([switch]$Run, [switch]$Clean, [string]$Arch)
 $ErrorActionPreference = 'Stop'
+
+# --- detect native and target architecture ---
+$nativeArch = switch ($env:PROCESSOR_ARCHITECTURE) {
+    'ARM64'  { 'arm64' }
+    'AMD64'  { 'x64' }
+    default  { 'x64' }
+}
+if (-not $Arch) { $Arch = $nativeArch }
+$Arch = $Arch.ToLower()
+if ($Arch -notin @('x64', 'arm64')) { throw "Unsupported architecture: $Arch (expected x64 or arm64)" }
 
 $root = $PSScriptRoot
 $srcDir = Join-Path $root 'src\win32'
-$out = Join-Path $root 'build-win32'
+$out = Join-Path $root "build-$Arch"
 $exe = Join-Path $out 'environ.exe'
 
 # --- locate VS + enter dev shell (in-process; env does not need to pre-exist) ---
@@ -21,7 +32,7 @@ $vs = & $vswhere -latest -prerelease -property installationPath
 if (-not $vs) { throw 'No Visual Studio installation found' }
 Import-Module (Join-Path $vs 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
 Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
-    -DevCmdArguments '-arch=x64 -host_arch=x64 -no_logo' | Out-Null
+    -DevCmdArguments "-arch=$Arch -host_arch=$nativeArch -no_logo" | Out-Null
 
 if ($Clean -and (Test-Path $out)) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -59,7 +70,7 @@ $clArgs = @(
     'd2d1.lib', 'dwrite.lib', 'dwmapi.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib', 'advapi32.lib', 'comctl32.lib'
 )
 
-Write-Host "Compiling $($sources.Count) file(s)..." -ForegroundColor Cyan
+Write-Host "Compiling $($sources.Count) file(s) for $Arch..." -ForegroundColor Cyan
 & cl @clArgs
 if ($LASTEXITCODE -ne 0) { throw "build failed (cl exit $LASTEXITCODE)" }
 

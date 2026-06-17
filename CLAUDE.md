@@ -27,12 +27,24 @@ starts instantly.
 
 ## Build & run
 ```
-.\build.ps1            # self-bootstrapping: locates VS18 + enters its dev env, no dev prompt needed
-.\build.ps1 -Run       # build + launch
-.\build.ps1 -Clean     # wipe build-win32/ first
+just build             # build for native arch (x64 or arm64)
+just build-x64         # explicit x64
+just build-arm64       # explicit ARM64 (cross-compile on x64 host)
+just build-all         # both architectures
+just run               # build + launch
+just clean             # wipe build dirs
+just rebuild           # clean + build
 ```
-- Output: `build-win32\environ.exe` (with `theme.toml` copied beside it; the app loads it
-  from its own directory, falling back to built-in dark/light/blue if absent).
+Or via PowerShell directly:
+```
+.\build.ps1                    # build for native arch
+.\build.ps1 -Arch arm64       # cross-compile for ARM64
+.\build.ps1 -Run              # build + launch
+.\build.ps1 -Clean            # wipe output first
+```
+- Output: `build-x64\environ.exe` or `build-arm64\environ.exe` (with `theme.toml` copied
+  beside it; the app loads it from its own directory, falling back to built-in
+  dark/light/blue if absent).
 - `extern/` deps are git submodules — `git submodule update --init --recursive` first.
 - No automated test suite. **The gate is: builds clean at `/W4 /WX`, zero warnings.**
 
