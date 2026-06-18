@@ -39,11 +39,13 @@ staying on C++/WinUI (the path that failed twice).
 
 ## Build & run
 ```
-.\build.ps1            # self-bootstrapping (finds VS18, no dev prompt needed)
-.\build.ps1 -Run       # build + launch
-.\build.ps1 -Clean     # wipe build-win32/ first
+just build             # build for native arch (x64 or arm64)
+just build-arm64       # explicit ARM64 (cross-compile on x64 host)
+just run               # build + launch
+just clean             # wipe build dirs
 ```
-Output: `build-win32\environ.exe` (+ `theme.toml` copied beside it).
+Or via PowerShell directly: `.\build.ps1 [-Arch x64|arm64] [-Run] [-Clean]`.
+Output: `build-x64\environ.exe` or `build-arm64\environ.exe` (+ `theme.toml` beside it).
 Gate: builds clean at `/W4 /WX`, zero warnings.
 
 ## Phases
@@ -56,32 +58,37 @@ Gate: builds clean at `/W4 /WX`, zero warnings.
 - **Phase 3 — Apply / save (done).** `EnvWriter` apply path, dry-run review,
   `WM_SETTINGCHANGE` broadcast (3A); themed review modal, conflict detection, path-list
   fidelity (3B). See `docs/PHASE-3.md`.
-- **Phase 4 — Editing completeness (next).** The features that make this fully replace the
-  built-in dialog:
-  - **Rename variables** — core already supports it (`EnvChange::Kind::Rename` +
-    `EnvVariable::original_name`); mainly host UI (editable name column).
-  - **Add / remove / reorder** PATH-like entries — host UI + `CurrentVars` reconstruction.
-  - **Entry info display** — expanded value, why-invalid, duplicate-of — as a tooltip or
-    detail strip. The data already exists on `EnvVariable` (`expanded_*`, `segment_valid`,
-    `segment_duplicate`).
+- **Phase 4 — Editing completeness.**
+  - **4A — Rename variables (done).** Editable name column, `EnvChange::Kind::Rename`.
+  - **4B — Add / remove / reorder PATH entries (done).** Keyboard triggers (`Insert`,
+    `Delete`, `Alt+Up/Down`), structural editing model, per-variable dirty flags.
+  - **4C — Entry info display (done).** Detail strip showing expanded value, why-invalid,
+    duplicate-of. Fixed `%VAR%` expansion for REG_SZ variables in validation.
+  - **4D — Context menu + clipboard (done).** Right-click context menu with context-sensitive
+    Insert/Remove/Copy (path entries vs whole variables). Single-row copy-to-clipboard.
+    Variable-level insert (new blank variable) and delete.
+  - **4E — Multi-row selection + clipboard (later).** The grid is fully custom-drawn (no
+    underlying ListView), so multi-select (Shift-click ranges, Ctrl-click toggles) must be
+    built from scratch. Goal: multi-row Copy; keep `m_selected` for all other operations.
 - **Phase 5 — Snapshots & history.** `SnapshotStore` wiring, history view, restore, diff —
   an undo/safety net over the registry writes.
 - **Phase 6 — Settings & theming UI.** In-app theme switch, custom schemes, window
-  placement persistence, a **typography section in the theme table** (font
-  family/size/weight join colors per CLAUDE.md — currently fonts live in code), and UI
-  **metrics** (caption/row height, button width) for Compact/Comfortable density modes.
+  placement persistence, **Ctrl+Mousewheel zoom**, a **typography section in the theme
+  table** (font family/size/weight — currently fonts live in code), UI **metrics**
+  (caption/row height, button width) for Compact/Comfortable density modes, and a
+  **user-configurable list of PATH-like variable names** (which variables get segment
+  expansion; overlaps with `KnowledgeBase`).
 - **Phase 7 — Elevation.** "Restart as Administrator" for `HKLM` editing; machine vars
   read-only until then.
-- **Phase 8 — Polish.** Search/filter, context menu + clipboard, TOML export/import,
-  accessibility (UIA) assessment.
+- **Phase 8 — Polish.** Search/filter, TOML export/import, accessibility (UIA) assessment.
 - **Cleanup (cross-cutting).** Delete retired hosts; update CLAUDE.md/memory.
 
 ## Later / not yet scheduled
-- **ARM64 build** — for Windows-on-ARM (e.g. an M-series Mac under Parallels). Low effort:
-  the code is portable and the data model is identical (LLP64), so it should compile clean;
-  mainly install the MSVC ARM64 build tools and parameterize `build.ps1`
-  (`-Arch x64|arm64` → `build-<arch>/`). Today's x64 exe already runs there under emulation.
 - Window-placement persistence is folded into Phase 6 (settings).
+
+## Done (cross-cutting)
+- **ARM64 build + justfile** — `just build-arm64` cross-compiles; `build.ps1` accepts
+  `-Arch x64|arm64`. Both x64 and ARM64 produce ~900 KB executables.
 
 ## Review workflow
 Each phase ends at a reviewable boundary. A second Claude instance reviews the diff via

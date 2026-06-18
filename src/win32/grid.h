@@ -54,6 +54,7 @@ namespace ui
         };
         bool SelectionEditable() const;
         std::optional<EditTarget> BeginEdit();             // edit the current selection
+        std::optional<EditTarget> BeginEditName();         // edit the name cell (after AddVariable)
         std::optional<EditTarget> BeginEditAt(float x, float y); // select + edit the row under a point
         bool SelectNextEditable(int dir);                  // Tab: move to next/prev editable row
         void CommitEdit(const std::wstring& text);         // write back + mark dirty
@@ -67,6 +68,11 @@ namespace ui
         bool RemoveEntry();                // remove the selected entry
         bool MoveEntry(int dir);           // move the entry up (-1) / down (+1) within its variable
 
+        // Variable-level structural editing: create a new blank variable or delete
+        // the selected variable entirely (all its rows). Returns true if changed.
+        bool AddVariable();
+        bool RemoveVariable();
+
         // Detail strip: info about the currently selected row for display below the grid.
         struct SelectionDetail
         {
@@ -78,12 +84,24 @@ namespace ui
         };
         std::optional<SelectionDetail> GetSelectionDetail() const;
 
+        // Right-click: select the row under the cursor (like OnLButtonDown but without
+        // scrollbar-thumb drag logic). Returns true if selection changed.
+        bool OnRButtonDown(float x, float y);
+
+        // Selection queries for context menu.
+        bool HasSelection() const { return m_selected >= 0 && m_selected < static_cast<int>(m_rows.size()); }
+
+        // Clipboard text for the selected row: segment → col2 value; variable → NAME=value
+        // (path-lists join all segments belonging to the same variable).
+        std::wstring CopyText() const;
+
         // Save support: the originals as loaded, and the current (edited) state rebuilt
         // from the rows. Used by the host with core EnvWriter.
         bool HasChanges() const;
         const std::vector<Environ::core::EnvVariable>& OriginalVars(Environ::core::Scope scope) const;
         std::vector<Environ::core::EnvVariable> CurrentVars(Environ::core::Scope scope) const;
         bool IsEditing() const { return m_editing >= 0; }
+        bool IsEditingName() const { return m_editing >= 0 && m_editingName; }
 
     private:
         struct Row

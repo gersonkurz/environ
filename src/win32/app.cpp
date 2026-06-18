@@ -348,7 +348,7 @@ namespace
         }
 
         const std::wstring footer = std::format(
-            L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+S apply   \x2022   F1/F2/F3 theme",
+            L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+C copy   \x2022   Ctrl+S apply   \x2022   F1/F2/F3 theme",
             std::wstring(s.name.begin(), s.name.end()), g_userCount, g_machineCount,
             g_elevated ? L"" : L"  (machine read-only)");
         DrawString(footer, g_fmtSub,
@@ -496,6 +496,14 @@ namespace
         if (const auto target{g_grid.BeginEdit()}) PositionEditor(hwnd, *target);
     }
 
+    void BeginEditNameFromGrid(HWND hwnd)
+    {
+        if (!g_grid.SelectionEditable()) return;
+        EnsureEditControl(hwnd);
+        if (!g_edit) return;
+        if (const auto target{g_grid.BeginEditName()}) PositionEditor(hwnd, *target);
+    }
+
     void BeginEditAt(HWND hwnd, float x, float y)
     {
         EnsureEditControl(hwnd);
@@ -503,6 +511,85 @@ namespace
         const auto target{g_grid.BeginEditAt(x, y)};
         InvalidateRect(hwnd, nullptr, FALSE); // selection may have moved even if not editable
         if (target) PositionEditor(hwnd, *target);
+    }
+
+    // Context menu item IDs.
+    constexpr UINT kMenuCopy{1001};
+    constexpr UINT kMenuInsert{1002};
+    constexpr UINT kMenuRemove{1003};
+
+    // Owner-drawn menu item data — stored in MENUITEMINFO::dwItemData.
+    struct MenuItemData
+    {
+        std::wstring label;
+        std::wstring accel;
+    };
+
+    void ShowGridContextMenu(HWND hwnd, int screenX, int screenY)
+    {
+        const bool editable{g_grid.SelectionEditable()};
+        const bool isPath{g_grid.SelectedIsPathEntry()};
+
+        HMENU hMenu{CreatePopupMenu()};
+        if (!hMenu) return;
+
+        // Context-sensitive labels: path-list entries vs scalar variables.
+        MenuItemData dataCopy{L"Copy", L"Ctrl+C"};
+        MenuItemData dataInsert{isPath ? L"Insert entry" : L"New variable", L"Ins"};
+        MenuItemData dataRemove{isPath ? L"Remove entry" : L"Delete variable", L"Del"};
+
+        const auto addItem = [&](UINT id, MenuItemData* data, bool enabled) {
+            MENUITEMINFOW mi{};
+            mi.cbSize = sizeof(mi);
+            mi.fMask = MIIM_ID | MIIM_FTYPE | MIIM_STATE | MIIM_DATA;
+            mi.fType = MFT_OWNERDRAW;
+            mi.fState = enabled ? MFS_ENABLED : MFS_GRAYED;
+            mi.wID = id;
+            mi.dwItemData = reinterpret_cast<ULONG_PTR>(data);
+            InsertMenuItemW(hMenu, id, FALSE, &mi);
+        };
+
+        addItem(kMenuCopy, &dataCopy, true);
+        addItem(kMenuInsert, &dataInsert, editable);
+        addItem(kMenuRemove, &dataRemove, editable);
+
+        // Set themed menu background via MENUINFO.
+        const theme::ColorScheme& s{g_theme.Current()};
+        HBRUSH menuBg{CreateSolidBrush(ToColorRef(s.card.fill))};
+        MENUINFO mi{};
+        mi.cbSize = sizeof(mi);
+        mi.fMask = MIM_BACKGROUND;
+        mi.hbrBack = menuBg;
+        SetMenuInfo(hMenu, &mi);
+
+        TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
+                       screenX, screenY, 0, hwnd, nullptr);
+        DestroyMenu(hMenu);
+        DeleteObject(menuBg);
+    }
+
+    void CopyToClipboard(HWND hwnd, const std::wstring& text)
+    {
+        if (text.empty()) return;
+        if (!OpenClipboard(hwnd)) return;
+        EmptyClipboard();
+        const size_t bytes{(text.size() + 1) * sizeof(wchar_t)};
+        HGLOBAL hMem{GlobalAlloc(GMEM_MOVEABLE, bytes)};
+        if (hMem)
+        {
+            void* dst{GlobalLock(hMem)};
+            if (dst)
+            {
+                memcpy(dst, text.c_str(), bytes);
+                GlobalUnlock(hMem);
+                SetClipboardData(CF_UNICODETEXT, hMem);
+            }
+            else
+            {
+                GlobalFree(hMem);
+            }
+        }
+        CloseClipboard();
     }
 
     void LoadData(); // defined below; re-reads the registry into the grid
@@ -627,6 +714,10 @@ namespace
                 return 0;
             case WM_LBUTTONDBLCLK:
                 return 0; // never let a double-click reach the grid while modal
+            case WM_RBUTTONDOWN:
+            case WM_RBUTTONUP:
+            case WM_CONTEXTMENU:
+                return 0; // suppress context menu while modal
             default:
                 break;
             }
@@ -687,13 +778,28 @@ namespace
         case WM_KEYDOWN:
         {
             if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(hwnd); return 0; }
+            if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) { CopyToClipboard(hwnd, g_grid.CopyText()); return 0; }
             if (wp == VK_RETURN) { BeginEditFromGrid(hwnd); return 0; }
-            if (wp == VK_INSERT) // add a path entry and edit it
+            if (wp == VK_INSERT)
             {
-                if (g_grid.AddEntry()) { InvalidateRect(hwnd, nullptr, FALSE); BeginEditFromGrid(hwnd); }
+                if (g_grid.SelectedIsPathEntry())
+                {
+                    if (g_grid.AddEntry()) { InvalidateRect(hwnd, nullptr, FALSE); BeginEditFromGrid(hwnd); }
+                }
+                else if (g_grid.SelectionEditable() || !g_grid.HasSelection())
+                {
+                    if (g_grid.AddVariable()) { InvalidateRect(hwnd, nullptr, FALSE); BeginEditNameFromGrid(hwnd); }
+                }
                 return 0;
             }
-            if (wp == VK_DELETE) { Repaint(hwnd, g_grid.RemoveEntry()); return 0; }
+            if (wp == VK_DELETE)
+            {
+                if (g_grid.SelectedIsPathEntry())
+                    Repaint(hwnd, g_grid.RemoveEntry());
+                else
+                    Repaint(hwnd, g_grid.RemoveVariable());
+                return 0;
+            }
             const char* want{nullptr};
             if (wp == VK_F1) want = "dark";
             else if (wp == VK_F2) want = "light";
@@ -769,10 +875,99 @@ namespace
             BeginEditAt(hwnd, GET_X_LPARAM(lp) / scale, GET_Y_LPARAM(lp) / scale);
             return 0;
         }
+        case WM_RBUTTONDOWN:
+        {
+            const float scale{DipScale(hwnd)};
+            const float xDip{GET_X_LPARAM(lp) / scale}, yDip{GET_Y_LPARAM(lp) / scale};
+            Repaint(hwnd, g_grid.OnRButtonDown(xDip, yDip));
+            return 0;
+        }
+        case WM_CONTEXTMENU:
+        {
+            if (g_grid.IsEditing()) EndEdit(hwnd, true);
+            if (!g_grid.HasSelection()) return 0;
+
+            int screenX{}, screenY{};
+            if (GET_X_LPARAM(lp) == -1 && GET_Y_LPARAM(lp) == -1)
+            {
+                // Keyboard-triggered (Apps key / Shift+F10): position at window center.
+                RECT rc{};
+                GetClientRect(hwnd, &rc);
+                POINT center{(rc.left + rc.right) / 2, (rc.top + rc.bottom) / 2};
+                ClientToScreen(hwnd, &center);
+                screenX = center.x;
+                screenY = center.y;
+            }
+            else
+            {
+                screenX = GET_X_LPARAM(lp);
+                screenY = GET_Y_LPARAM(lp);
+            }
+            ShowGridContextMenu(hwnd, screenX, screenY);
+            return 0;
+        }
         case WM_MOUSEWHEEL:
             if (g_grid.IsEditing()) EndEdit(hwnd, true);
             Repaint(hwnd, g_grid.OnWheel(GET_WHEEL_DELTA_WPARAM(wp)));
             return 0;
+        case WM_MEASUREITEM:
+        {
+            auto* mis = reinterpret_cast<MEASUREITEMSTRUCT*>(lp);
+            if (mis->CtlType == ODT_MENU)
+            {
+                const float scale{DipScale(hwnd)};
+                mis->itemWidth = static_cast<UINT>(200.0f * scale);
+                mis->itemHeight = static_cast<UINT>(32.0f * scale);
+            }
+            return TRUE;
+        }
+        case WM_DRAWITEM:
+        {
+            auto* dis = reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+            if (dis->CtlType == ODT_MENU)
+            {
+                const theme::ColorScheme& s{g_theme.Current()};
+                const bool selected{(dis->itemState & ODS_SELECTED) != 0};
+                const bool grayed{(dis->itemState & ODS_GRAYED) != 0};
+
+                // Background: card.fill normally, rowHover.fill when highlighted (and not disabled).
+                const COLORREF bg{ToColorRef((selected && !grayed) ? s.rowHover.fill : s.card.fill)};
+                HBRUSH hbr{CreateSolidBrush(bg)};
+                FillRect(dis->hDC, &dis->rcItem, hbr);
+                DeleteObject(hbr);
+
+                // Font: use the cached GDI edit font if available, else system default.
+                HGDIOBJ prevFont{nullptr};
+                if (g_editFont) prevFont = SelectObject(dis->hDC, g_editFont);
+
+                SetBkMode(dis->hDC, TRANSPARENT);
+
+                const auto* data = reinterpret_cast<const MenuItemData*>(dis->itemData);
+                if (data)
+                {
+                    const int pad{static_cast<int>(8.0f * DipScale(hwnd))};
+                    RECT rcLabel{dis->rcItem};
+                    rcLabel.left += pad;
+                    rcLabel.right -= pad;
+
+                    // Label (left-aligned): headerText or headerSubtext if disabled.
+                    SetTextColor(dis->hDC, ToColorRef(grayed ? s.headerSubtext : (selected ? s.rowHover.text : s.headerText)));
+                    DrawTextW(dis->hDC, data->label.c_str(), static_cast<int>(data->label.size()),
+                              &rcLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
+
+                    // Accelerator hint (right-aligned, always headerSubtext).
+                    if (!data->accel.empty())
+                    {
+                        SetTextColor(dis->hDC, ToColorRef(s.headerSubtext));
+                        DrawTextW(dis->hDC, data->accel.c_str(), static_cast<int>(data->accel.size()),
+                                  &rcLabel, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
+                    }
+                }
+
+                if (prevFont) SelectObject(dis->hDC, prevFont);
+            }
+            return TRUE;
+        }
         case WM_CTLCOLOREDIT:
             if (reinterpret_cast<HWND>(lp) == g_edit)
             {
@@ -784,6 +979,31 @@ namespace
             }
             break;
         case WM_COMMAND:
+            if (lp == 0) // menu command
+            {
+                switch (LOWORD(wp))
+                {
+                case kMenuCopy:
+                    CopyToClipboard(hwnd, g_grid.CopyText());
+                    return 0;
+                case kMenuInsert:
+                    if (g_grid.SelectedIsPathEntry())
+                    {
+                        if (g_grid.AddEntry()) { InvalidateRect(hwnd, nullptr, FALSE); BeginEditFromGrid(hwnd); }
+                    }
+                    else
+                    {
+                        if (g_grid.AddVariable()) { InvalidateRect(hwnd, nullptr, FALSE); BeginEditNameFromGrid(hwnd); }
+                    }
+                    return 0;
+                case kMenuRemove:
+                    if (g_grid.SelectedIsPathEntry())
+                        Repaint(hwnd, g_grid.RemoveEntry());
+                    else
+                        Repaint(hwnd, g_grid.RemoveVariable());
+                    return 0;
+                }
+            }
             if (reinterpret_cast<HWND>(lp) == g_edit && HIWORD(wp) == EN_KILLFOCUS)
             {
                 EndEdit(hwnd, true);
@@ -791,10 +1011,18 @@ namespace
             }
             break;
         case WM_APP_EDIT_END:
+        {
+            const bool wasName{g_grid.IsEditingName()};
             EndEdit(hwnd, wp != 0);
-            if (wp == 2 && g_grid.SelectNextEditable(lp != 0 ? -1 : 1)) // Tab → next editable row
-                BeginEditFromGrid(hwnd);
+            if (wp == 2) // Tab
+            {
+                if (wasName && lp == 0) // forward Tab from name → edit value of same row
+                    BeginEditFromGrid(hwnd);
+                else if (g_grid.SelectNextEditable(lp != 0 ? -1 : 1))
+                    BeginEditFromGrid(hwnd);
+            }
             return 0;
+        }
         case WM_PAINT:
         {
             PAINTSTRUCT ps{};

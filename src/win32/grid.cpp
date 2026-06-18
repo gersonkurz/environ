@@ -101,8 +101,11 @@ namespace ui
         for (bool f : m_userStruct) if (f) return true;       // added/removed/reordered entries
         for (bool f : m_machineStruct) if (f) return true;
         for (const Row& r : m_rows)
+        {
+            if (r.varIndex == -1) return true;                // new variable exists
             if (r.col2 != r.original || (r.kind == Row::Kind::Variable && r.col1 != r.col1Original))
                 return true;
+        }
         return false;
     }
 
@@ -153,6 +156,13 @@ namespace ui
         std::vector<EnvVariable> result{(scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig};
         const std::vector<bool>& structEdited{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
 
+        // Track which original varIndexes are still referenced by rows, so we can detect
+        // deletions after the walk.
+        std::vector<bool> seen(result.size(), false);
+
+        // New variables (varIndex == -1) collected during the walk; appended at the end.
+        std::vector<EnvVariable> newVars;
+
         // Reconstruct each variable from its contiguous block of rows in display order: the
         // variable row holds the name (and the first entry), segment rows hold the rest.
         for (size_t i{0}; i < m_rows.size();)
@@ -175,7 +185,20 @@ namespace ui
             }
             i = j;
 
+            // New variable (not yet saved): build a fresh EnvVariable and collect it.
+            if (vi == -1)
+            {
+                EnvVariable nv{};
+                nv.name = name;
+                nv.value = entries.empty() ? std::wstring{} : entries.front();
+                nv.kind = EnvVariableKind::Scalar;
+                nv.is_expandable = false;
+                newVars.push_back(std::move(nv));
+                continue;
+            }
+
             if (vi < 0 || vi >= static_cast<int>(result.size())) continue;
+            seen[static_cast<size_t>(vi)] = true;
             EnvVariable& v{result[static_cast<size_t>(vi)]};
 
             if (name != nameOriginal) // rename: compute_diff turns original_name into a Rename
@@ -203,6 +226,19 @@ namespace ui
                 v.value = Environ::core::apply_segment_edits(v.value, entries);
             }
         }
+
+        // Remove deleted variables: structural flag set but no rows reference them.
+        for (size_t k{result.size()}; k > 0; --k)
+        {
+            const size_t idx{k - 1};
+            if (!seen[idx] && idx < structEdited.size() && structEdited[idx])
+                result.erase(result.begin() + static_cast<long long>(idx));
+        }
+
+        // Append newly created variables.
+        for (auto& nv : newVars)
+            result.push_back(std::move(nv));
+
         return result;
     }
 
@@ -275,6 +311,16 @@ namespace ui
         m_editing = m_selected;
         m_editingName = false; // Enter edits the value
         return EditTarget{ValueCellRect(m_selected), m_rows[static_cast<size_t>(m_selected)].col2, false};
+    }
+
+    std::optional<Grid::EditTarget> Grid::BeginEditName()
+    {
+        if (!SelectionEditable()) return std::nullopt;
+        if (m_rows[static_cast<size_t>(m_selected)].kind != Row::Kind::Variable) return std::nullopt;
+        EnsureVisible(m_selected);
+        m_editing = m_selected;
+        m_editingName = true;
+        return EditTarget{NameCellRect(m_selected), m_rows[static_cast<size_t>(m_selected)].col1, true};
     }
 
     void Grid::CommitEdit(const std::wstring& text)
@@ -361,6 +407,84 @@ namespace ui
 
         std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
         if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
+        ClampScroll();
+        return true;
+    }
+
+    bool Grid::AddVariable()
+    {
+        // Determine scope: use the selected row's scope if available and editable,
+        // otherwise default to User (always editable).
+        Environ::core::Scope scope{Environ::core::Scope::User};
+        if (HasSelection() && !m_rows[static_cast<size_t>(m_selected)].readOnly)
+            scope = m_rows[static_cast<size_t>(m_selected)].scope;
+
+        // Find insertion point: after the last row belonging to the same scope section.
+        // If we have a selection in that scope, insert after the selected variable's group.
+        int insertAt{0};
+        if (HasSelection() && m_rows[static_cast<size_t>(m_selected)].scope == scope)
+        {
+            const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
+            size_t j{static_cast<size_t>(m_selected)};
+            while (j + 1 < m_rows.size() && m_rows[j + 1].scope == scope && m_rows[j + 1].varIndex == vi)
+                ++j;
+            insertAt = static_cast<int>(j) + 1;
+        }
+        else
+        {
+            // Append at the end of the scope's section.
+            for (size_t i{0}; i < m_rows.size(); ++i)
+            {
+                if (m_rows[i].scope == scope)
+                    insertAt = static_cast<int>(i) + 1;
+            }
+        }
+
+        Row var{};
+        var.kind = Row::Kind::Variable;
+        var.depth = 0;
+        var.readOnly = false;
+        var.scope = scope;
+        var.varIndex = -1; // sentinel: new variable
+        var.segIndex = -1;
+        m_rows.insert(m_rows.begin() + insertAt, std::move(var));
+        m_selected = insertAt;
+        EnsureVisible(m_selected);
+        return true;
+    }
+
+    bool Grid::RemoveVariable()
+    {
+        if (!HasSelection()) return false;
+        const Row& sel{m_rows[static_cast<size_t>(m_selected)]};
+        if (sel.readOnly) return false;
+
+        const Environ::core::Scope scope{sel.scope};
+        const int vi{sel.varIndex};
+
+        if (vi == -1)
+        {
+            // New, unsaved variable: just erase the single row.
+            m_rows.erase(m_rows.begin() + m_selected);
+        }
+        else
+        {
+            // Existing variable: erase ALL rows with this scope+varIndex.
+            std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
+            if (vi >= 0 && vi < static_cast<int>(flags.size()))
+                flags[static_cast<size_t>(vi)] = true;
+
+            for (auto it{m_rows.begin()}; it != m_rows.end();)
+            {
+                if (it->scope == scope && it->varIndex == vi)
+                    it = m_rows.erase(it);
+                else
+                    ++it;
+            }
+        }
+
+        if (m_selected >= static_cast<int>(m_rows.size()))
+            m_selected = static_cast<int>(m_rows.size()) - 1;
         ClampScroll();
         return true;
     }
@@ -573,6 +697,36 @@ namespace ui
     {
         if (m_hover != -1) { m_hover = -1; return true; }
         return false;
+    }
+
+    bool Grid::OnRButtonDown(float x, float y)
+    {
+        const Layout lay{Compute()};
+        const int r = RowAtPoint(lay, x, y);
+        if (r >= 0 && r != m_selected) { m_selected = r; return true; }
+        return false;
+    }
+
+    std::wstring Grid::CopyText() const
+    {
+        if (!HasSelection()) return {};
+        const Row& r{m_rows[static_cast<size_t>(m_selected)]};
+
+        // Segment row → just the path value.
+        if (r.kind == Row::Kind::Segment) return r.col2;
+
+        // Variable row: collect all entries belonging to this variable.
+        std::vector<std::wstring> entries;
+        for (size_t i{0}; i < m_rows.size(); ++i)
+        {
+            if (m_rows[i].scope == r.scope && m_rows[i].varIndex == r.varIndex)
+                entries.push_back(m_rows[i].col2);
+        }
+
+        // Scalar (segIndex == -1) → NAME=value; path-list → NAME=joined.
+        if (r.segIndex < 0)
+            return r.col1 + L"=" + (entries.empty() ? std::wstring{} : entries.front());
+        return r.col1 + L"=" + Environ::core::join_segments(entries);
     }
 
     bool Grid::OnLButtonDown(float x, float y)
