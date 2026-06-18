@@ -534,7 +534,8 @@ namespace
         if (!hMenu) return;
 
         // Context-sensitive labels: path-list entries vs scalar variables.
-        MenuItemData dataCopy{L"Copy", L"Ctrl+C"};
+        const int selCount{g_grid.SelectionCount()};
+        MenuItemData dataCopy{selCount > 1 ? std::format(L"Copy {} rows", selCount) : std::wstring{L"Copy"}, L"Ctrl+C"};
         MenuItemData dataInsert{isPath ? L"Insert entry" : L"New variable", L"Ins"};
         MenuItemData dataRemove{isPath ? L"Remove entry" : L"Delete variable", L"Del"};
 
@@ -861,7 +862,9 @@ namespace
             if (cap == 2) { PostMessageW(hwnd, WM_CLOSE, 0, 0); return 0; }
             SetFocus(hwnd);
             SetCapture(hwnd);
-            Repaint(hwnd, g_grid.OnLButtonDown(xDip, yDip));
+            const bool shift{(GetKeyState(VK_SHIFT) & 0x8000) != 0};
+            const bool ctrl{(GetKeyState(VK_CONTROL) & 0x8000) != 0};
+            Repaint(hwnd, g_grid.OnLButtonDown(xDip, yDip, shift, ctrl));
             return 0;
         }
         case WM_LBUTTONUP:
@@ -879,7 +882,9 @@ namespace
         {
             const float scale{DipScale(hwnd)};
             const float xDip{GET_X_LPARAM(lp) / scale}, yDip{GET_Y_LPARAM(lp) / scale};
-            Repaint(hwnd, g_grid.OnRButtonDown(xDip, yDip));
+            const bool shift{(GetKeyState(VK_SHIFT) & 0x8000) != 0};
+            const bool ctrl{(GetKeyState(VK_CONTROL) & 0x8000) != 0};
+            Repaint(hwnd, g_grid.OnRButtonDown(xDip, yDip, shift, ctrl));
             return 0;
         }
         case WM_CONTEXTMENU:

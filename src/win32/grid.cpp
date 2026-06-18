@@ -41,6 +41,7 @@ namespace ui
         m_scrollY = 0.0f;
         m_hover = -1;
         m_selected = -1;
+        m_selection.clear();
         m_editing = -1;
         m_editingName = false;
 
@@ -278,6 +279,12 @@ namespace ui
         m_scrollY = std::clamp(m_scrollY, 0.0f, lay.maxScroll);
     }
 
+    void Grid::ClearAndSelectFocus()
+    {
+        m_selection.clear();
+        if (m_selected >= 0) m_selection.insert(m_selected);
+    }
+
     float Grid::NameColWidth() const
     {
         return std::min(260.0f, (m_bounds.right - m_bounds.left) * 0.34f);
@@ -370,6 +377,7 @@ namespace ui
         entry.varIndex = vi;
         m_rows.insert(m_rows.begin() + m_selected + 1, entry);
         m_selected += 1; // select the new (blank) entry so the host can edit it
+        ClearAndSelectFocus();
 
         std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
         if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
@@ -405,6 +413,7 @@ namespace ui
             }
         }
 
+        ClearAndSelectFocus();
         std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
         if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
         ClampScroll();
@@ -449,6 +458,7 @@ namespace ui
         var.segIndex = -1;
         m_rows.insert(m_rows.begin() + insertAt, std::move(var));
         m_selected = insertAt;
+        ClearAndSelectFocus();
         EnsureVisible(m_selected);
         return true;
     }
@@ -485,6 +495,7 @@ namespace ui
 
         if (m_selected >= static_cast<int>(m_rows.size()))
             m_selected = static_cast<int>(m_rows.size()) - 1;
+        ClearAndSelectFocus();
         ClampScroll();
         return true;
     }
@@ -502,6 +513,7 @@ namespace ui
 
         std::swap(m_rows[static_cast<size_t>(m_selected)].col2, m_rows[static_cast<size_t>(other)].col2);
         m_selected = other; // selection follows the moved entry
+        ClearAndSelectFocus();
 
         std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
         if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
@@ -544,6 +556,7 @@ namespace ui
             if (!m_rows[static_cast<size_t>(i)].readOnly)
             {
                 m_selected = i;
+                ClearAndSelectFocus();
                 EnsureVisible(i);
                 return true;
             }
@@ -597,7 +610,8 @@ namespace ui
         for (; i < static_cast<int>(m_rows.size()) && y < lay.data.bottom; ++i, y += m_rowH)
         {
             const Row& r{m_rows[static_cast<size_t>(i)]};
-            const bool selected = (i == m_selected);
+            const bool selected = m_selection.contains(i);
+            const bool focused = (i == m_selected);
             const bool hovered = (i == m_hover && !selected);
             const std::vector<bool>& sf{(r.scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
             const bool varStruct{r.varIndex >= 0 && r.varIndex < static_cast<int>(sf.size())
@@ -642,7 +656,7 @@ namespace ui
             else if (r.readOnly)  valueColor = s.readonlyText;
             else if (hovered)     valueColor = s.rowHover.text;
 
-            if (selected)
+            if (focused)
             {
                 brush->SetColor(s.accent);
                 rt->FillRectangle(D2D1::RectF(rowRect.left, y + 6.0f, rowRect.left + 3.0f, y + m_rowH - 6.0f), brush);
@@ -699,37 +713,74 @@ namespace ui
         return false;
     }
 
-    bool Grid::OnRButtonDown(float x, float y)
+    bool Grid::OnRButtonDown(float x, float y, bool /*shift*/, bool /*ctrl*/)
     {
         const Layout lay{Compute()};
         const int r = RowAtPoint(lay, x, y);
-        if (r >= 0 && r != m_selected) { m_selected = r; return true; }
-        return false;
+        if (r < 0) return false;
+
+        if (m_selection.contains(r))
+        {
+            // Clicked row is already selected: keep the selection, just move focus.
+            if (r != m_selected) { m_selected = r; return true; }
+            return false;
+        }
+        // Clicked row is not in selection: clear and select just this row.
+        m_selected = r;
+        m_selection.clear();
+        m_selection.insert(r);
+        return true;
     }
 
     std::wstring Grid::CopyText() const
     {
-        if (!HasSelection()) return {};
-        const Row& r{m_rows[static_cast<size_t>(m_selected)]};
+        if (m_selection.empty()) return {};
 
-        // Segment row → just the path value.
-        if (r.kind == Row::Kind::Segment) return r.col2;
+        // Collect selected row indices in order.
+        std::vector<int> sel(m_selection.begin(), m_selection.end());
 
-        // Variable row: collect all entries belonging to this variable.
-        std::vector<std::wstring> entries;
-        for (size_t i{0}; i < m_rows.size(); ++i)
+        std::wstring result;
+        size_t pos{0};
+        while (pos < sel.size())
         {
-            if (m_rows[i].scope == r.scope && m_rows[i].varIndex == r.varIndex)
-                entries.push_back(m_rows[i].col2);
-        }
+            const int idx{sel[pos]};
+            if (idx < 0 || idx >= static_cast<int>(m_rows.size())) { ++pos; continue; }
+            const Row& r{m_rows[static_cast<size_t>(idx)]};
 
-        // Scalar (segIndex == -1) → NAME=value; path-list → NAME=joined.
-        if (r.segIndex < 0)
-            return r.col1 + L"=" + (entries.empty() ? std::wstring{} : entries.front());
-        return r.col1 + L"=" + Environ::core::join_segments(entries);
+            if (r.kind == Row::Kind::Variable)
+            {
+                // Collect all contiguous selected rows belonging to this same variable.
+                std::vector<std::wstring> entries;
+                entries.push_back(r.col2);
+                size_t j{pos + 1};
+                while (j < sel.size())
+                {
+                    const int ni{sel[j]};
+                    if (ni < 0 || ni >= static_cast<int>(m_rows.size())) break;
+                    const Row& nr{m_rows[static_cast<size_t>(ni)]};
+                    if (nr.scope != r.scope || nr.varIndex != r.varIndex) break;
+                    entries.push_back(nr.col2);
+                    ++j;
+                }
+                if (!result.empty()) result += L"\r\n";
+                if (r.segIndex < 0)
+                    result += r.col1 + L"=" + (entries.empty() ? std::wstring{} : entries.front());
+                else
+                    result += r.col1 + L"=" + Environ::core::join_segments(entries);
+                pos = j;
+            }
+            else
+            {
+                // Standalone segment row (no Variable row selected above it).
+                if (!result.empty()) result += L"\r\n";
+                result += r.col2;
+                ++pos;
+            }
+        }
+        return result;
     }
 
-    bool Grid::OnLButtonDown(float x, float y)
+    bool Grid::OnLButtonDown(float x, float y, bool shift, bool ctrl)
     {
         const Layout lay{Compute()};
         if (lay.hasScrollbar && Contains(lay.thumb, x, y))
@@ -739,8 +790,35 @@ namespace ui
             return true; // thumb darkens while grabbed
         }
         const int r = RowAtPoint(lay, x, y);
-        if (r >= 0 && r != m_selected) { m_selected = r; return true; }
-        return false;
+        if (r < 0) return false;
+
+        if (ctrl)
+        {
+            // Toggle the clicked row in/out of the selection set.
+            if (m_selection.contains(r))
+                m_selection.erase(r);
+            else
+                m_selection.insert(r);
+            m_selected = r;
+        }
+        else if (shift)
+        {
+            // Range-select from the current focus to the clicked row (inclusive).
+            const int anchor{m_selected >= 0 ? m_selected : 0};
+            const int lo{std::min(anchor, r)};
+            const int hi{std::max(anchor, r)};
+            for (int i{lo}; i <= hi; ++i)
+                m_selection.insert(i);
+            m_selected = r;
+        }
+        else
+        {
+            // Plain click: clear selection, set focus = clicked row.
+            m_selected = r;
+            m_selection.clear();
+            m_selection.insert(r);
+        }
+        return true;
     }
 
     bool Grid::OnLButtonUp()
@@ -776,6 +854,7 @@ namespace ui
         }
 
         m_selected = sel;
+        ClearAndSelectFocus();
         EnsureVisible(sel);
         return true;
     }

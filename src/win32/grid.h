@@ -8,6 +8,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -39,7 +40,7 @@ namespace ui
         // Each returns true when a repaint is needed.
         bool OnMouseMove(float x, float y);
         bool OnMouseLeave();
-        bool OnLButtonDown(float x, float y);
+        bool OnLButtonDown(float x, float y, bool shift, bool ctrl);
         bool OnLButtonUp();
         bool OnWheel(int delta);
         bool OnKey(int vk);
@@ -86,13 +87,14 @@ namespace ui
 
         // Right-click: select the row under the cursor (like OnLButtonDown but without
         // scrollbar-thumb drag logic). Returns true if selection changed.
-        bool OnRButtonDown(float x, float y);
+        bool OnRButtonDown(float x, float y, bool shift, bool ctrl);
 
         // Selection queries for context menu.
         bool HasSelection() const { return m_selected >= 0 && m_selected < static_cast<int>(m_rows.size()); }
+        int SelectionCount() const { return static_cast<int>(m_selection.size()); }
 
-        // Clipboard text for the selected row: segment → col2 value; variable → NAME=value
-        // (path-lists join all segments belonging to the same variable).
+        // Clipboard text for the selected rows: single row → segment or NAME=value;
+        // multi-selection → all selected rows' data joined with \r\n.
         std::wstring CopyText() const;
 
         // Save support: the originals as loaded, and the current (edited) state rebuilt
@@ -133,6 +135,7 @@ namespace ui
         };
 
         Layout Compute() const;
+        void ClearAndSelectFocus();
         float NameColWidth() const;
         D2D1_RECT_F ValueCellRect(int row) const;
         D2D1_RECT_F NameCellRect(int row) const;
@@ -153,6 +156,7 @@ namespace ui
         float m_scrollY{0.0f};
         int m_hover{-1};
         int m_selected{-1};
+        std::set<int> m_selection;  // highlighted rows (always includes m_selected when non-empty)
         int m_editing{-1};
         bool m_editingName{false}; // true = editing the name cell, false = the value cell
         bool m_draggingThumb{false};
