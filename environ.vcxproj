@@ -317,6 +317,8 @@
     <ClInclude Include="src\win32\d2dwindow.h" />
     <ClInclude Include="src\win32\mainwindow.h" />
     <ClInclude Include="src\win32\grid.h" />
+    <ClInclude Include="src\win32\gridview.h" />
+    <ClInclude Include="src\win32\view.h" />
     <ClInclude Include="src\win32\theme.h" />
     <ClInclude Include="targetver.h" />
   </ItemGroup>
@@ -354,6 +356,7 @@
     <ClCompile Include="src\win32\d2dwindow.cpp" />
     <ClCompile Include="src\win32\mainwindow.cpp" />
     <ClCompile Include="src\win32\grid.cpp" />
+    <ClCompile Include="src\win32\gridview.cpp" />
     <ClCompile Include="src\win32\theme.cpp" />
   </ItemGroup>
   <ItemGroup>

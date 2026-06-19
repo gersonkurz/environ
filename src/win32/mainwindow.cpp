@@ -1,8 +1,9 @@
 #include "precomp.h"
 
 // MainWindow — environ's main application window.
-// Inherits D2DWindow (frameless-window boilerplate) and adds all
-// environ-specific behavior: grid, modals, editor, data, theme switching.
+// Inherits D2DWindow (frameless-window boilerplate) and acts as a shell
+// (title bar, footer, modal overlays) that hosts an active View.
+// The GridView is the default view.
 
 #include "mainwindow.h"
 #include "EnvStore.h"
@@ -57,7 +58,7 @@ namespace
         return dir + L"\\theme.toml";
     }
 
-    // Context menu item IDs.
+    // Context menu item IDs (used by WM_COMMAND for owner-draw menu dispatching).
     constexpr UINT kMenuCopy{1001};
     constexpr UINT kMenuInsert{1002};
     constexpr UINT kMenuRemove{1003};
@@ -68,30 +69,6 @@ namespace
         std::wstring label;
         std::wstring accel;
     };
-
-    // Subclass for the inline EDIT: intercept Enter/Esc/Tab (which a bare EDIT ignores or
-    // beeps on) and hand control back to the window via a posted message.
-    LRESULT CALLBACK EditSubclass(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR ref)
-    {
-        HWND parent{reinterpret_cast<HWND>(ref)};
-        if (msg == WM_KEYDOWN)
-        {
-            if (wp == VK_RETURN) { PostMessageW(parent, WM_APP_EDIT_END, 1, 0); return 0; }
-            if (wp == VK_ESCAPE) { PostMessageW(parent, WM_APP_EDIT_END, 0, 0); return 0; }
-            if (wp == VK_TAB)    { PostMessageW(parent, WM_APP_EDIT_END, 2, (GetKeyState(VK_SHIFT) < 0) ? 1 : 0); return 0; }
-            if (wp == VK_F1 || wp == VK_F2 || wp == VK_F3)
-            {
-                PostMessageW(parent, WM_APP_EDIT_END, 1, 0); // commit, then let the parent switch theme
-                PostMessageW(parent, WM_KEYDOWN, wp, lp);
-                return 0;
-            }
-        }
-        else if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_ESCAPE || wp == VK_TAB))
-        {
-            return 0; // swallow to avoid the EDIT beep
-        }
-        return DefSubclassProc(h, msg, wp, lp);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -194,131 +171,6 @@ bool ui::MainWindow::CreateFonts()
         && m_fmtHeader && m_fmtGlyph && m_fmtButton && m_fmtMono;
 }
 
-void ui::MainWindow::RefreshEditBrush()
-{
-    if (m_editBrush) { DeleteObject(m_editBrush); m_editBrush = nullptr; }
-    m_editBrush = CreateSolidBrush(ToColorRef(m_theme.Current().edit.fill));
-}
-
-void ui::MainWindow::RefreshEditFont()
-{
-    if (!m_edit) return;
-    const float scale{DipScale()};
-    const auto px = [scale](float dip) { return static_cast<int>(dip * scale); };
-    if (m_editFont) DeleteObject(m_editFont);
-    if (m_editFontName) DeleteObject(m_editFontName);
-    // Value font matches the value column (12, normal); name font matches the name
-    // column (14, semibold). PositionEditor selects one per edit.
-    m_editFont = CreateFontW(-px(12.0f * m_zoom), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
-    m_editFontName = CreateFontW(-px(14.0f * m_zoom), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                 CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
-}
-
-// --- Editor ---
-
-void ui::MainWindow::EnsureEditControl()
-{
-    if (m_edit) return;
-    m_edit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | ES_AUTOHSCROLL, 0, 0, 0, 0,
-                             m_hwnd, nullptr,
-                             reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(m_hwnd, GWLP_HINSTANCE)), nullptr);
-    if (!m_edit)
-    {
-        spdlog::error("inline edit control creation failed");
-        return;
-    }
-    if (!SetWindowSubclass(m_edit, EditSubclass, 1, reinterpret_cast<DWORD_PTR>(m_hwnd)))
-    {
-        spdlog::error("SetWindowSubclass for edit control failed");
-        DestroyWindow(m_edit);
-        m_edit = nullptr;
-        return;
-    }
-    RefreshEditFont();
-    SendMessageW(m_edit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, 0);
-}
-
-void ui::MainWindow::EndEdit(bool commit)
-{
-    if (!m_edit || !IsWindowVisible(m_edit)) return;
-    if (commit)
-    {
-        const int len{GetWindowTextLengthW(m_edit)};
-        std::wstring text(static_cast<size_t>(len) + 1, L'\0'); // +1 writable slot for the terminator
-        const int copied{GetWindowTextW(m_edit, text.data(), len + 1)};
-        text.resize(static_cast<size_t>(copied));
-        m_grid.CommitEdit(text);
-    }
-    else
-    {
-        m_grid.CancelEdit();
-    }
-    ShowWindow(m_edit, SW_HIDE);
-    SetFocus(m_hwnd);
-    InvalidateRect(m_hwnd, nullptr, FALSE);
-}
-
-void ui::MainWindow::PositionEditor(const Grid::EditTarget& target)
-{
-    const float scale{DipScale()};
-    const auto px = [scale](float dip) { return static_cast<int>(dip * scale); };
-    const D2D1_RECT_F& c{target.cell};
-
-    // Pick the cached font matching the field being edited (name = heavier, like its
-    // display), then size the control to exactly one line and center it: a single-line
-    // EDIT top-aligns its text, so a one-line-tall control lands it on the cell center.
-    HFONT font{target.isName ? m_editFontName : m_editFont};
-    SendMessageW(m_edit, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-
-    TEXTMETRICW tm{};
-    if (const HDC dc{GetDC(m_edit)})
-    {
-        const HGDIOBJ prev{SelectObject(dc, font)};
-        GetTextMetricsW(dc, &tm);
-        SelectObject(dc, prev);
-        ReleaseDC(m_edit, dc);
-    }
-    const int cellTop{px(c.top)};
-    const int cellH{px(c.bottom) - cellTop};
-    const int editH{tm.tmHeight > 0 ? static_cast<int>(tm.tmHeight) : px(16.0f)};
-    MoveWindow(m_edit, px(c.left), cellTop + (cellH - editH) / 2,
-               px(c.right) - px(c.left), editH, FALSE);
-
-    SetWindowTextW(m_edit, target.text.c_str());
-    ShowWindow(m_edit, SW_SHOW);
-    SetFocus(m_edit);
-    SendMessageW(m_edit, EM_SETSEL, 0, -1);
-    InvalidateRect(m_hwnd, nullptr, FALSE);
-}
-
-void ui::MainWindow::BeginEditFromGrid()
-{
-    if (!m_grid.SelectionEditable()) return; // nothing to edit; don't even create the control
-    EnsureEditControl();
-    if (!m_edit) return; // creation failed; don't leave the grid stuck in editing state
-    if (const auto target{m_grid.BeginEdit()}) PositionEditor(*target);
-}
-
-void ui::MainWindow::BeginEditNameFromGrid()
-{
-    if (!m_grid.SelectionEditable()) return;
-    EnsureEditControl();
-    if (!m_edit) return;
-    if (const auto target{m_grid.BeginEditName()}) PositionEditor(*target);
-}
-
-void ui::MainWindow::BeginEditAt(float x, float y)
-{
-    EnsureEditControl();
-    if (!m_edit) return;
-    const auto target{m_grid.BeginEditAt(x, y)};
-    InvalidateRect(m_hwnd, nullptr, FALSE); // selection may have moved even if not editable
-    if (target) PositionEditor(*target);
-}
-
 // --- Title bar ---
 
 void ui::MainWindow::ApplyTitleBar()
@@ -326,97 +178,51 @@ void ui::MainWindow::ApplyTitleBar()
     ApplyDarkTitleBar(m_theme.Current().darkTitleBar);
 }
 
-// --- Menu / clipboard ---
+// --- View plumbing ---
 
-void ui::MainWindow::ShowGridContextMenu(int screenX, int screenY)
+ui::ViewContext ui::MainWindow::MakeContext() const
 {
-    const bool editable{m_grid.SelectionEditable()};
-    const bool isPath{m_grid.SelectedIsPathEntry()};
-
-    HMENU hMenu{CreatePopupMenu()};
-    if (!hMenu) return;
-
-    // Context-sensitive labels: path-list entries vs scalar variables.
-    const int selCount{m_grid.SelectionCount()};
-    MenuItemData dataCopy{selCount > 1 ? std::format(L"Copy {} rows", selCount) : std::wstring{L"Copy"}, L"Ctrl+C"};
-    MenuItemData dataInsert{isPath ? L"Insert entry" : L"New variable", L"Ins"};
-    MenuItemData dataRemove{isPath ? L"Remove entry" : L"Delete variable", L"Del"};
-
-    const auto addItem = [&](UINT id, MenuItemData* data, bool enabled) {
-        MENUITEMINFOW mi{};
-        mi.cbSize = sizeof(mi);
-        mi.fMask = MIIM_ID | MIIM_FTYPE | MIIM_STATE | MIIM_DATA;
-        mi.fType = MFT_OWNERDRAW;
-        mi.fState = enabled ? MFS_ENABLED : MFS_GRAYED;
-        mi.wID = id;
-        mi.dwItemData = reinterpret_cast<ULONG_PTR>(data);
-        InsertMenuItemW(hMenu, id, FALSE, &mi);
+    return ViewContext{
+        m_rt,
+        m_brush,
+        &m_theme.Current(),
+        m_hwnd,
+        m_zoom,
+        DipScale(),
+        m_fmtSub.get(),
+        m_fmtName.get(),
+        m_fmtValue.get(),
+        m_fmtHeader.get(),
+        m_fmtButton.get(),
+        m_fmtMono.get(),
+        m_fmtGlyph.get(),
     };
-
-    addItem(kMenuCopy, &dataCopy, true);
-    addItem(kMenuInsert, &dataInsert, editable);
-    addItem(kMenuRemove, &dataRemove, editable);
-
-    // Set themed menu background via MENUINFO.
-    const theme::ColorScheme& s{m_theme.Current()};
-    HBRUSH menuBg{CreateSolidBrush(ToColorRef(s.card.fill))};
-    MENUINFO mi{};
-    mi.cbSize = sizeof(mi);
-    mi.fMask = MIM_BACKGROUND;
-    mi.hbrBack = menuBg;
-    SetMenuInfo(hMenu, &mi);
-
-    TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON,
-                   screenX, screenY, 0, m_hwnd, nullptr);
-    DestroyMenu(hMenu);
-    DeleteObject(menuBg);
 }
 
-void ui::MainWindow::CopyToClipboard(const std::wstring& text)
+D2D1_RECT_F ui::MainWindow::ViewBounds(const D2D1_SIZE_F& sz) const
 {
-    if (text.empty()) return;
-    if (!OpenClipboard(m_hwnd)) return;
-    EmptyClipboard();
-    const size_t bytes{(text.size() + 1) * sizeof(wchar_t)};
-    HGLOBAL hMem{GlobalAlloc(GMEM_MOVEABLE, bytes)};
-    if (hMem)
-    {
-        void* dst{GlobalLock(hMem)};
-        if (dst)
-        {
-            memcpy(dst, text.c_str(), bytes);
-            GlobalUnlock(hMem);
-            SetClipboardData(CF_UNICODETEXT, hMem);
-        }
-        else
-        {
-            GlobalFree(hMem);
-        }
-    }
-    CloseClipboard();
+    const float pad{16.0f};
+    // View sits between caption (48 DIP) and footer (bottom 28 DIP),
+    // with a 4 DIP gap above the footer for spacing.
+    return D2D1::RectF(pad, 40.0f + 8.0f, sz.width - pad, sz.height - 32.0f);
 }
 
 // --- Data / save ---
 
 void ui::MainWindow::LoadData()
 {
-    using namespace Environ::core;
-    m_elevated = is_elevated();
-    std::vector<EnvVariable> userVars = read_variables(Scope::User);
-    std::vector<EnvVariable> machineVars = read_variables(Scope::Machine);
-    expand_and_validate(userVars);
-    expand_and_validate(machineVars);
-    detect_duplicates(userVars, machineVars);
-    m_userCount = userVars.size();
-    m_machineCount = machineVars.size();
-    m_grid.SetData(userVars, machineVars, m_elevated);
+    m_gridView.LoadData(Environ::core::is_elevated());
 }
 
 void ui::MainWindow::SaveChanges()
 {
     using namespace Environ::core;
-    if (m_grid.IsEditing()) EndEdit(true);
-    if (!m_grid.HasChanges())
+    if (m_grid.IsEditing())
+    {
+        const auto ctx{MakeContext()};
+        m_gridView.OnEditEnd(ctx, true, false, false);
+    }
+    if (!m_gridView.HasChanges())
     {
         MessageBoxW(m_hwnd, L"No changes to apply.", L"environ", MB_OK | MB_ICONINFORMATION);
         return;
@@ -485,7 +291,8 @@ void ui::MainWindow::ApplyReviewed()
     m_reviewOpen = false;
     const ApplyResult result{apply_document_changes(
         m_grid.OriginalVars(Scope::User), m_reviewCurUser,
-        m_grid.OriginalVars(Scope::Machine), m_reviewCurMachine, m_elevated)};
+        m_grid.OriginalVars(Scope::Machine), m_reviewCurMachine,
+        Environ::core::is_elevated())};
 
     if (result.succeeded())
     {
@@ -641,7 +448,11 @@ void ui::MainWindow::DeleteSelectedSnapshot()
 void ui::MainWindow::OpenHistory()
 {
     using namespace Environ::core;
-    if (m_grid.IsEditing()) EndEdit(true);
+    if (m_grid.IsEditing())
+    {
+        const auto ctx{MakeContext()};
+        m_gridView.OnEditEnd(ctx, true, false, false);
+    }
     m_historySnapshots = m_snapshots.list_snapshots();
 
     // Read current registry once, reused for all "vs current" comparisons.
@@ -687,9 +498,8 @@ void ui::MainWindow::RestoreSnapshot()
     detect_duplicates(curUser, curMachine);
     detect_duplicates(snapUser, snapMachine);
 
-    m_grid.SetDataForRestore(curUser, curMachine, snapUser, snapMachine, m_elevated);
-    m_userCount = snapUser.size();
-    m_machineCount = snapMachine.size();
+    m_grid.SetDataForRestore(curUser, curMachine, snapUser, snapMachine, is_elevated());
+    m_gridView.SetCounts(snapUser.size(), snapMachine.size());
 
     m_historyOpen = false;
     InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -892,54 +702,20 @@ void ui::MainWindow::PaintHistory(const theme::ColorScheme& s, const D2D1_SIZE_F
 
 void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
 {
-    const theme::ColorScheme& s = m_theme.Current();
+    const theme::ColorScheme& s{m_theme.Current()};
     m_rt->Clear(s.windowBg);
-
-    const float pad{16.0f};
 
     DrawCaption(s, sz.width, L"environ");
 
-    m_grid.Paint(m_rt, m_brush, ui::GridFonts{m_fmtName.get(), m_fmtValue.get(), m_fmtHeader.get()}, s,
-                 D2D1::RectF(pad, 40.0f + 8.0f, sz.width - pad, sz.height - 56.0f));
+    const auto ctx{MakeContext()};
+    const auto bounds{ViewBounds(sz)};
+    m_activeView->Paint(ctx, bounds);
 
-    // Detail strip: expanded path / validity / duplicate info for the selected row.
-    if (const auto detail{m_grid.GetSelectionDetail()})
-    {
-        std::wstring text;
-        D2D1_COLOR_F color{s.headerSubtext};
-
-        if (!detail->valid)
-        {
-            text = L"\x2717 " + detail->expandedPath + L" \x2014 path not found";
-            color = s.rowInvalid.text;
-        }
-        else if (!detail->duplicateDesc.empty())
-        {
-            text = L"\x2192 " + detail->expandedPath + L" \x2014 " + detail->duplicateDesc;
-            color = s.rowDuplicate.text;
-        }
-        else if (detail->expandedPath != detail->displayPath)
-        {
-            text = L"\x2192 " + detail->expandedPath;
-        }
-        // else: expanded == display -> nothing to show
-
-        if (!text.empty())
-        {
-            DrawString(text, m_fmtSub.get(),
-                       D2D1::RectF(pad, sz.height - 52.0f, sz.width - pad, sz.height - 32.0f),
-                       color);
-        }
-    }
-
-    std::wstring footer = std::format(
-        L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+C copy   \x2022   Ctrl+S apply   \x2022   Ctrl+H history   \x2022   F1/F2/F3 theme",
-        std::wstring(s.name.begin(), s.name.end()), m_userCount, m_machineCount,
-        m_elevated ? L"" : L"  (machine read-only)");
-    if (m_zoom != 1.0f)
-        footer += std::format(L"   \x2022   {}%", static_cast<int>(m_zoom * 100));
+    // Footer: active view provides the text.
+    const float pad{16.0f};
+    const std::wstring footer{m_activeView->GetStatusText(ctx)};
     DrawString(footer, m_fmtSub.get(),
-             D2D1::RectF(pad, sz.height - 28.0f, sz.width - pad, sz.height - 8.0f), s.headerSubtext);
+               D2D1::RectF(pad, sz.height - 28.0f, sz.width - pad, sz.height - 8.0f), s.headerSubtext);
 
     if (m_reviewOpen) PaintReview(s, sz);
     if (m_historyOpen) PaintHistory(s, sz);
@@ -949,13 +725,14 @@ void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
 
 void ui::MainWindow::OnSize()
 {
-    if (m_grid.IsEditing()) EndEdit(true);
+    const auto ctx{MakeContext()};
+    m_activeView->OnSize(ctx);
 }
 
 void ui::MainWindow::OnDpiChanged()
 {
-    if (m_grid.IsEditing()) EndEdit(true);
-    RefreshEditFont();
+    const auto ctx{MakeContext()};
+    m_activeView->OnDpiChanged(ctx);
 }
 
 void ui::MainWindow::OnDestroy()
@@ -977,11 +754,6 @@ void ui::MainWindow::OnDestroy()
     m_fmtHeader.reset();
     m_fmtButton.reset();
     m_fmtMono.reset();
-
-    // Release GDI editor objects.
-    if (m_editBrush)    { DeleteObject(m_editBrush);    m_editBrush = nullptr; }
-    if (m_editFont)     { DeleteObject(m_editFont);     m_editFont = nullptr; }
-    if (m_editFontName) { DeleteObject(m_editFontName); m_editFontName = nullptr; }
 }
 
 // --- HandleMessage ---
@@ -1130,74 +902,59 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             break;
         }
     }
+
+    const auto ctx{MakeContext()};
     switch (msg)
     {
     case WM_SYSKEYDOWN:
-        // Alt+Up / Alt+Down move the selected path entry (Alt combos arrive here).
-        if ((wp == VK_UP || wp == VK_DOWN) && (lp & (1 << 29)))
+        if (m_activeView->OnSysKey(ctx, static_cast<int>(wp), lp))
         {
-            if (m_grid.MoveEntry(wp == VK_UP ? -1 : 1)) InvalidateRect(m_hwnd, nullptr, FALSE);
+            InvalidateRect(m_hwnd, nullptr, FALSE);
             return 0;
         }
         break; // DefWindowProc handles other system keys (Alt+F4, Alt+Space, ...)
     case WM_KEYDOWN:
     {
+        // Global shortcuts first.
         if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(); return 0; }
-        if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) { CopyToClipboard(m_grid.CopyText()); return 0; }
+        if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000))
+        {
+            m_gridView.CopyToClipboard(m_grid.CopyText());
+            return 0;
+        }
         if (wp == 'H' && (GetKeyState(VK_CONTROL) & 0x8000)) { OpenHistory(); return 0; }
         if (wp == '0' && (GetKeyState(VK_CONTROL) & 0x8000))
         {
-            if (m_grid.IsEditing()) EndEdit(true);
+            if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
             m_zoom = 1.0f;
             CreateFonts();
             m_grid.SetZoom(m_zoom);
-            RefreshEditFont();
+            m_gridView.RefreshEditFont(MakeContext());
             m_settings.appearance.zoom.set(static_cast<int32_t>(m_zoom * 100.0f));
             m_settings.save();
             InvalidateRect(m_hwnd, nullptr, FALSE);
             return 0;
         }
-        if (wp == VK_RETURN) { BeginEditFromGrid(); return 0; }
-        if (wp == VK_INSERT)
-        {
-            if (m_grid.SelectedIsPathEntry())
-            {
-                if (m_grid.AddEntry()) { InvalidateRect(m_hwnd, nullptr, FALSE); BeginEditFromGrid(); }
-            }
-            else if (m_grid.SelectionEditable() || !m_grid.HasSelection())
-            {
-                if (m_grid.AddVariable()) { InvalidateRect(m_hwnd, nullptr, FALSE); BeginEditNameFromGrid(); }
-            }
-            return 0;
-        }
-        if (wp == VK_DELETE)
-        {
-            if (m_grid.SelectedIsPathEntry())
-                Repaint(m_grid.RemoveEntry());
-            else
-                Repaint(m_grid.RemoveVariable());
-            return 0;
-        }
+        // Theme switching.
         const char* want{nullptr};
         if (wp == VK_F1) want = "dark";
         else if (wp == VK_F2) want = "light";
         else if (wp == VK_F3) want = "blue";
         if (want)
         {
-            if (m_grid.IsEditing()) EndEdit(true); // defensive: never switch theme mid-edit
+            if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
             if (m_theme.SelectByName(want))
             {
                 ApplyTitleBar();
-                if (m_editBrush) RefreshEditBrush(); // re-tint the cached editor brush
+                m_gridView.RefreshEditBrush();
                 m_settings.appearance.theme.set(m_theme.Current().name);
                 m_settings.save();
                 InvalidateRect(m_hwnd, nullptr, FALSE);
             }
+            return 0;
         }
-        else
-        {
-            Repaint(m_grid.OnKey(static_cast<int>(wp)));
-        }
+        // Delegate to active view.
+        Repaint(m_activeView->OnKey(ctx, static_cast<int>(wp)));
         return 0;
     }
     case WM_MOUSEMOVE:
@@ -1208,14 +965,14 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         GetClientRect(m_hwnd, &rc);
         const float xDip{GET_X_LPARAM(lp) / scale}, yDip{GET_Y_LPARAM(lp) / scale};
         bool need{UpdateCaptionHover(xDip, yDip, rc.right / scale)};
-        need |= m_grid.OnMouseMove(xDip, yDip);
+        need |= m_activeView->OnMouseMove(ctx, xDip, yDip);
         Repaint(need);
         return 0;
     }
     case WM_MOUSELEAVE:
     {
         bool need{ResetCaptionTracking()};
-        need |= m_grid.OnMouseLeave();
+        need |= m_activeView->OnMouseLeave();
         Repaint(need);
         return 0;
     }
@@ -1231,18 +988,18 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         SetCapture(m_hwnd);
         const bool shift{(GetKeyState(VK_SHIFT) & 0x8000) != 0};
         const bool ctrl{(GetKeyState(VK_CONTROL) & 0x8000) != 0};
-        Repaint(m_grid.OnLButtonDown(xDip, yDip, shift, ctrl));
+        Repaint(m_activeView->OnLButtonDown(ctx, xDip, yDip, shift, ctrl));
         return 0;
     }
     case WM_LBUTTONUP:
         ReleaseCapture();
-        Repaint(m_grid.OnLButtonUp());
+        Repaint(m_activeView->OnLButtonUp());
         return 0;
     case WM_LBUTTONDBLCLK:
     {
         if (m_eatNextDblClk) { m_eatNextDblClk = false; return 0; } // trailing dblclk of a modal close
         const float scale{DipScale()};
-        BeginEditAt(GET_X_LPARAM(lp) / scale, GET_Y_LPARAM(lp) / scale);
+        m_activeView->OnLButtonDblClk(ctx, GET_X_LPARAM(lp) / scale, GET_Y_LPARAM(lp) / scale);
         return 0;
     }
     case WM_RBUTTONDOWN:
@@ -1251,14 +1008,11 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         const float xDip{GET_X_LPARAM(lp) / scale}, yDip{GET_Y_LPARAM(lp) / scale};
         const bool shift{(GetKeyState(VK_SHIFT) & 0x8000) != 0};
         const bool ctrl{(GetKeyState(VK_CONTROL) & 0x8000) != 0};
-        Repaint(m_grid.OnRButtonDown(xDip, yDip, shift, ctrl));
+        Repaint(m_activeView->OnRButtonDown(ctx, xDip, yDip, shift, ctrl));
         return 0;
     }
     case WM_CONTEXTMENU:
     {
-        if (m_grid.IsEditing()) EndEdit(true);
-        if (!m_grid.HasSelection()) return 0;
-
         int screenX{}, screenY{};
         if (GET_X_LPARAM(lp) == -1 && GET_Y_LPARAM(lp) == -1)
         {
@@ -1275,25 +1029,24 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             screenX = GET_X_LPARAM(lp);
             screenY = GET_Y_LPARAM(lp);
         }
-        ShowGridContextMenu(screenX, screenY);
+        m_activeView->OnContextMenu(ctx, screenX, screenY);
         return 0;
     }
     case WM_MOUSEWHEEL:
         if (GetKeyState(VK_CONTROL) & 0x8000)
         {
-            if (m_grid.IsEditing()) EndEdit(true);
+            if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
             const float delta{(GET_WHEEL_DELTA_WPARAM(wp) > 0) ? 0.1f : -0.1f};
             m_zoom = std::clamp(m_zoom + delta, 0.5f, 2.0f);
             CreateFonts();
             m_grid.SetZoom(m_zoom);
-            RefreshEditFont();
+            m_gridView.RefreshEditFont(MakeContext());
             m_settings.appearance.zoom.set(static_cast<int32_t>(m_zoom * 100.0f));
             m_settings.save();
             InvalidateRect(m_hwnd, nullptr, FALSE);
             return 0;
         }
-        if (m_grid.IsEditing()) EndEdit(true);
-        Repaint(m_grid.OnWheel(GET_WHEEL_DELTA_WPARAM(wp)));
+        Repaint(m_activeView->OnWheel(ctx, GET_WHEEL_DELTA_WPARAM(wp)));
         return 0;
     case WM_MEASUREITEM:
     {
@@ -1321,9 +1074,10 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             FillRect(dis->hDC, &dis->rcItem, hbr);
             DeleteObject(hbr);
 
-            // Font: use the cached GDI edit font if available, else system default.
+            // Font: use the cached GDI edit font from GridView if available.
             HGDIOBJ prevFont{nullptr};
-            if (m_editFont) prevFont = SelectObject(dis->hDC, m_editFont);
+            HFONT menuFont{m_gridView.EditFont()};
+            if (menuFont) prevFont = SelectObject(dis->hDC, menuFont);
 
             SetBkMode(dis->hDC, TRANSPARENT);
 
@@ -1354,14 +1108,8 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         return TRUE;
     }
     case WM_CTLCOLOREDIT:
-        if (reinterpret_cast<HWND>(lp) == m_edit)
-        {
-            const theme::ColorScheme& s{m_theme.Current()};
-            SetTextColor(reinterpret_cast<HDC>(wp), ToColorRef(s.edit.text));
-            SetBkColor(reinterpret_cast<HDC>(wp), ToColorRef(s.edit.fill));
-            if (!m_editBrush) RefreshEditBrush();
-            return reinterpret_cast<LRESULT>(m_editBrush);
-        }
+        if (m_gridView.IsEditControl(reinterpret_cast<HWND>(lp)))
+            return m_gridView.OnCtlColorEdit(ctx, wp);
         break;
     case WM_COMMAND:
         if (lp == 0) // menu command
@@ -1369,16 +1117,16 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             switch (LOWORD(wp))
             {
             case kMenuCopy:
-                CopyToClipboard(m_grid.CopyText());
+                m_gridView.CopyToClipboard(m_grid.CopyText());
                 return 0;
             case kMenuInsert:
                 if (m_grid.SelectedIsPathEntry())
                 {
-                    if (m_grid.AddEntry()) { InvalidateRect(m_hwnd, nullptr, FALSE); BeginEditFromGrid(); }
+                    if (m_grid.AddEntry()) { InvalidateRect(m_hwnd, nullptr, FALSE); m_gridView.BeginEditFromGrid(ctx); }
                 }
                 else
                 {
-                    if (m_grid.AddVariable()) { InvalidateRect(m_hwnd, nullptr, FALSE); BeginEditNameFromGrid(); }
+                    if (m_grid.AddVariable()) { InvalidateRect(m_hwnd, nullptr, FALSE); m_gridView.BeginEditNameFromGrid(ctx); }
                 }
                 return 0;
             case kMenuRemove:
@@ -1389,23 +1137,15 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
                 return 0;
             }
         }
-        if (reinterpret_cast<HWND>(lp) == m_edit && HIWORD(wp) == EN_KILLFOCUS)
+        if (HIWORD(wp) == EN_KILLFOCUS && m_gridView.IsEditControl(reinterpret_cast<HWND>(lp)))
         {
-            EndEdit(true);
+            m_gridView.OnEditEnd(ctx, true, false, false);
             return 0;
         }
         break;
     case WM_APP_EDIT_END:
     {
-        const bool wasName{m_grid.IsEditingName()};
-        EndEdit(wp != 0);
-        if (wp == 2) // Tab
-        {
-            if (wasName && lp == 0) // forward Tab from name -> edit value of same row
-                BeginEditFromGrid();
-            else if (m_grid.SelectNextEditable(lp != 0 ? -1 : 1))
-                BeginEditFromGrid();
-        }
+        m_gridView.OnEditEnd(ctx, wp != 0, wp == 2, lp != 0);
         return 0;
     }
     }

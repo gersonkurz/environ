@@ -2,6 +2,7 @@
 
 #include "d2dwindow.h"
 #include "grid.h"
+#include "gridview.h"
 #include "AppSettings.h"
 #include "EnvStore.h"
 #include "EnvWriter.h"
@@ -47,29 +48,19 @@ private:
 
     // Fonts
     bool CreateFonts();
-    void RefreshEditBrush();
-    void RefreshEditFont();
-
-    // Editor
-    void EnsureEditControl();
-    void EndEdit(bool commit);
-    void PositionEditor(const Grid::EditTarget& target);
-    void BeginEditFromGrid();
-    void BeginEditNameFromGrid();
-    void BeginEditAt(float x, float y);
 
     // Title bar
     void ApplyTitleBar();
-
-    // Menu / clipboard
-    void ShowGridContextMenu(int screenX, int screenY);
-    void CopyToClipboard(const std::wstring& text);
 
     // Data / save
     void LoadData();
     void SaveChanges();
     void CancelReview();
     void ApplyReviewed();
+
+    // View plumbing
+    ViewContext MakeContext() const;
+    D2D1_RECT_F ViewBounds(const D2D1_SIZE_F& sz) const;
 
     // Review layout
     ReviewGeom ReviewLayout(const D2D1_SIZE_F& sz);
@@ -103,15 +94,10 @@ private:
     Environ::core::SnapshotStore m_snapshots;
     Environ::core::AppSettings   m_settings;
     float  m_zoom{1.0f};
-    size_t m_userCount{0};
-    size_t m_machineCount{0};
-    bool   m_elevated{false};
 
-    // Inline editor
-    HWND   m_edit{nullptr};
-    HFONT  m_editFont{nullptr};
-    HFONT  m_editFontName{nullptr};
-    HBRUSH m_editBrush{nullptr};
+    // View layer
+    GridView m_gridView{m_grid, m_theme};
+    View*    m_activeView{&m_gridView};
 
     // Review modal
     bool m_reviewOpen{false};
