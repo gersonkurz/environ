@@ -313,6 +313,7 @@
     <ClInclude Include="src\core\EnvWriter.h" />
     <ClInclude Include="src\core\KnowledgeBase.h" />
     <ClInclude Include="src\core\SnapshotStore.h" />
+    <ClInclude Include="src\win32\app.h" />
     <ClInclude Include="src\win32\grid.h" />
     <ClInclude Include="src\win32\theme.h" />
     <ClInclude Include="targetver.h" />

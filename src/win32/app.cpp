@@ -6,6 +6,7 @@
 // live data from core EnvStore and forwards input.
 
 
+#include "app.h"
 #include "theme.h"
 #include "grid.h"
 #include "AppSettings.h"
@@ -1733,46 +1734,50 @@ namespace
     }
 }
 
-int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
+// ---------------------------------------------------------------------------
+// App class — application lifecycle
+// ---------------------------------------------------------------------------
+
+bool ui::App::InitLogging()
 {
-    // Set up spdlog with a file sink so logging is visible in a /SUBSYSTEM:WINDOWS app.
+    wchar_t* appdata{nullptr};
+    if (SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &appdata) != S_OK)
     {
-        wchar_t* appdata{nullptr};
-        if (SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &appdata) == S_OK)
-        {
-            std::filesystem::path logPath{appdata};
-            CoTaskMemFree(appdata);
-            logPath /= L"environ";
-            std::filesystem::create_directories(logPath);
-            logPath /= L"environ.log";
-            auto fileSink{std::make_shared<spdlog::sinks::basic_file_sink_mt>(logPath.string(), true)};
-            auto logger{std::make_shared<spdlog::logger>("environ", fileSink)};
-            logger->set_level(spdlog::level::info);
-            logger->flush_on(spdlog::level::info);
-            spdlog::set_default_logger(logger);
-        }
-        else
-        {
-            CoTaskMemFree(appdata);
-        }
+        CoTaskMemFree(appdata);
+        spdlog::error("SHGetKnownFolderPath failed; cannot set up logging");
+        return false;
     }
+    std::filesystem::path logPath{appdata};
+    CoTaskMemFree(appdata);
+    logPath /= L"environ";
+    std::filesystem::create_directories(logPath);
+    logPath /= L"environ.log";
+    auto fileSink{std::make_shared<spdlog::sinks::basic_file_sink_mt>(logPath.string(), true)};
+    auto logger{std::make_shared<spdlog::logger>("environ", fileSink)};
+    logger->set_level(spdlog::level::info);
+    logger->flush_on(spdlog::level::info);
+    spdlog::set_default_logger(logger);
+    return true;
+}
 
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-
+bool ui::App::InitGraphics()
+{
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_d2d)))
     {
         spdlog::error("D2D1CreateFactory failed");
-        ReleaseGraphics();
-        return 1;
+        return false;
     }
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                    reinterpret_cast<IUnknown**>(&g_dw))))
     {
         spdlog::error("DWriteCreateFactory failed");
-        ReleaseGraphics();
-        return 1;
+        return false;
     }
+    return true;
+}
 
+bool ui::App::InitSettings()
+{
     try
     {
         g_settings.load();
@@ -1780,45 +1785,44 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     catch (const std::exception& e)
     {
         spdlog::error("Settings load failed: {}", e.what());
-        ReleaseGraphics();
-        return 1;
+        return false;
     }
     g_zoom = std::clamp(static_cast<float>(g_settings.appearance.zoom.get()) / 100.0f, 0.5f, 2.0f);
-    spdlog::info("Settings: window=({},{} {}x{}), maximized={}, theme='{}', zoom={}%",
-                 g_settings.window.x.get(), g_settings.window.y.get(),
-                 g_settings.window.width.get(), g_settings.window.height.get(),
-                 g_settings.window.maximized.get(),
-                 g_settings.appearance.theme.get(),
-                 g_settings.appearance.zoom.get());
 
     g_theme.LoadOrDefault(ThemePathBesideExe());
     {
         const auto& savedTheme{g_settings.appearance.theme.get()};
-        if (!savedTheme.empty())
-        {
-            const bool found{g_theme.SelectByName(savedTheme)};
-            spdlog::info("Theme restore: '{}' -> {}", savedTheme, found ? "found" : "NOT FOUND");
-        }
+        if (!savedTheme.empty()) g_theme.SelectByName(savedTheme);
     }
+    return true;
+}
 
+bool ui::App::InitFonts()
+{
     if (!CreateFonts())
     {
         spdlog::error("text format creation failed");
-        ReleaseGraphics();
-        return 1;
+        return false;
     }
+    return true;
+}
 
+void ui::App::InitData()
+{
     LoadData();
     g_grid.SetZoom(g_zoom);
 
     if (!g_snapshots.open())
         spdlog::warn("Snapshot database unavailable; history disabled");
+}
 
+bool ui::App::CreateMainWindow()
+{
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.style = CS_DBLCLKS; // deliver WM_LBUTTONDBLCLK
     wc.lpfnWndProc = WndProc;
-    wc.hInstance = hInst;
+    wc.hInstance = m_hInst;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.lpszClassName = L"EnvironWin32Host";
     RegisterClassExW(&wc);
@@ -1833,12 +1837,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
 
     g_hwnd = CreateWindowExW(
         0, wc.lpszClassName, L"environ", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        wx, wy, ww, wh, nullptr, nullptr, hInst, nullptr);
+        wx, wy, ww, wh, nullptr, nullptr, m_hInst, nullptr);
     if (!g_hwnd)
     {
         spdlog::error("CreateWindowExW failed");
-        ReleaseGraphics();
-        return 1;
+        return false;
     }
 
     ApplyTitleBar(g_hwnd);
@@ -1856,8 +1859,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     // Re-run NCCALCSIZE so the frameless client takes effect.
     SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0,
                  SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-    ShowWindow(g_hwnd, g_settings.window.maximized.get() ? SW_MAXIMIZE : nCmdShow);
+    ShowWindow(g_hwnd, g_settings.window.maximized.get() ? SW_MAXIMIZE : m_nCmdShow);
+    return true;
+}
 
+int ui::App::MessageLoop()
+{
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0))
     {
@@ -1865,4 +1872,40 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
         DispatchMessageW(&msg);
     }
     return static_cast<int>(msg.wParam);
+}
+
+int ui::App::Run(HINSTANCE hInst, int nCmdShow)
+{
+    m_hInst = hInst;
+    m_nCmdShow = nCmdShow;
+
+    if (!InitLogging()) return 1;
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    if (!InitGraphics() || !InitSettings() || !InitFonts())
+    {
+        ReleaseGraphics();
+        return 1;
+    }
+
+    InitData();
+
+    if (!CreateMainWindow())
+    {
+        ReleaseGraphics();
+        return 1;
+    }
+
+    const int exitCode{MessageLoop()};
+    // WM_DESTROY already calls ReleaseGraphics(), but the call is idempotent
+    // (null-checks each pointer), so we ensure cleanup even if the message
+    // loop exits without a WM_DESTROY (e.g. GetMessageW returning -1).
+    ReleaseGraphics();
+    return exitCode;
+}
+
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
+{
+    ui::App app;
+    return app.Run(hInst, nCmdShow);
 }
