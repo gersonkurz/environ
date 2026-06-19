@@ -20,33 +20,25 @@ starts instantly.
   **This is where UI work goes.**
 - **`src/core/`** — plain C++20 logic (`Environ::core`). No Win32/UI, no WinRT. **Stays.**
   Reused unchanged by the new host.
-- **Retired — do NOT extend, kept on disk until the pivot fully lands then deleted:**
-  `scratch/EnvironNativeBaseline/` (WinUI baseline) and `src/ui/` (old handcrafted host).
-  The old top-level CMake/MSBuild build targets the retired WinUI baseline; ignore it for
-  host work. `codex-readme.md` is WinUI-era history only.
+- The retired WinUI code (`scratch/`, `src/ui/`) has been deleted.
 
 ## Build & run
+Requires: VS 2025 (v145 toolset), `msbuild` on PATH, `just`.
 ```
-just build             # build for native arch (x64 or arm64)
-just build-x64         # explicit x64
-just build-arm64       # explicit ARM64 (cross-compile on x64 host)
-just build-all         # both architectures
-just run               # build + launch
-just clean             # wipe build dirs
+just build             # Debug, native arch (x64 or ARM64 via %PROCESSOR_ARCHITECTURE%)
+just release           # Release, native arch
+just build-all         # all configurations (Debug+Release, x64+ARM64)
+just run               # Debug + launch
+just clean             # wipe bin/ and temp/
 just rebuild           # clean + build
 ```
-Or via PowerShell directly:
-```
-.\build.ps1                    # build for native arch
-.\build.ps1 -Arch arm64       # cross-compile for ARM64
-.\build.ps1 -Run              # build + launch
-.\build.ps1 -Clean            # wipe output first
-```
-- Output: `build-x64\environ.exe` or `build-arm64\environ.exe` (with `theme.toml` copied
-  beside it; the app loads it from its own directory, falling back to built-in
-  dark/light/blue if absent).
-- `extern/` deps are git submodules — `git submodule update --init --recursive` first.
-- No automated test suite. **The gate is: builds clean at `/W4 /WX`, zero warnings.**
+Or directly: `msbuild environ.vcxproj /p:Configuration=Debug /p:Platform=x64 /m`
+
+- Project: `environ.vcxproj` (precompiled headers via `precomp.h`/`precomp.cpp`).
+- Output: `bin\x64\Debug\environ.exe`, `bin\x64\Release\environ.exe`, etc.
+- Theme: `theme.toml` is loaded from beside the exe, falling back to built-in
+  dark/light/blue if absent.
+- No automated test suite. **The gate is: builds clean at `/W4`, zero warnings.**
 
 ## Architecture
 ### Host (`src/win32/`)
@@ -80,8 +72,8 @@ Or via PowerShell directly:
   Administrator" relaunch. Anything touching `HKLM` must check elevation and surface failure
   visibly — never silently fail or succeed.
 - **Exceptions:** our own code is exception-free (HRESULT / return codes / `std::optional`).
-  `/EHsc` is enabled only because toml++ and the STL need it to compile under `/WX`; toml++
-  runs in `TOML_EXCEPTIONS=0` (no-throw) mode. Do not introduce `throw`/`catch` in our code.
+  `/EHsc` is enabled because toml++ and the STL need it. Do not introduce `throw`/`catch`
+  in our code.
 
 ## Code style
 - C++20: concepts, ranges, `std::format`, structured bindings where they clarify — not to show off.
@@ -101,15 +93,9 @@ Or via PowerShell directly:
 - Stays within the current phase's scope (`docs/PHASE-*.md`).
 
 ## If the build breaks, check in this order
-1. Does `.\build.ps1` locate VS18? (`vswhere` → `Enter-VsDevShell`; the script re-enters the
-   dev env every run because tool shells don't persist environment.)
-2. Are the `extern/` submodules present (toml++, pnq, spdlog, sqlite3)?
+1. Is `msbuild` on PATH? (run from a VS Developer Command Prompt or use `vsdevcmd`.)
+2. Are the `Extern/` dependencies present (toml++, pnq, spdlog, sqlite3-amalgamation)?
 3. Compiler/linker errors in `src/win32/` or `src/core/` — read them; don't guess.
-
-## Review workflow
-Each phase ends at a reviewable boundary. Run `.\review.ps1` to spin up a second Claude
-instance as the `code-reviewer` subagent (`.claude/agents/code-reviewer.md`); `-Headless`
-writes `docs/reviews/review-<stamp>.md`. Address findings before the next phase.
 
 ## Do not
 - Add dependencies without asking — the dependency list is deliberately minimal.
