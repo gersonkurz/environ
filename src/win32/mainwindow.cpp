@@ -3,7 +3,7 @@
 // MainWindow — environ's main application window.
 // Inherits D2DWindow (frameless-window boilerplate) and acts as a shell
 // (title bar, footer, modal overlays) that hosts an active View.
-// The GridView is the default view.
+// The GridView is the default view; Ctrl+H switches to HistoryView.
 
 #include "mainwindow.h"
 #include "EnvStore.h"
@@ -31,21 +31,6 @@ namespace
     COLORREF ToColorRef(const D2D1_COLOR_F& c)
     {
         return RGB(static_cast<BYTE>(c.r * 255.0f), static_cast<BYTE>(c.g * 255.0f), static_cast<BYTE>(c.b * 255.0f));
-    }
-
-    // Format "2026-06-18T14:22:05Z" as "2026-06-18  14:22:05"
-    std::wstring FormatTimestamp(const std::string& ts)
-    {
-        std::wstring w;
-        w.reserve(ts.size());
-        for (char c : ts) w.push_back(static_cast<wchar_t>(c));
-        if (w.size() >= 11 && w[10] == L'T')
-        {
-            w[10] = L' ';
-            w.insert(10, 1, L' ');
-        }
-        if (!w.empty() && w.back() == L'Z') w.pop_back();
-        return w;
     }
 
     std::wstring ThemePathBesideExe()
@@ -207,6 +192,38 @@ D2D1_RECT_F ui::MainWindow::ViewBounds(const D2D1_SIZE_F& sz) const
     return D2D1::RectF(pad, 40.0f + 8.0f, sz.width - pad, sz.height - 32.0f);
 }
 
+void ui::MainWindow::SwitchToView(View* view)
+{
+    if (m_activeView == view) return;
+    m_activeView->Deactivate();
+    m_activeView = view;
+    const auto ctx{MakeContext()};
+    m_activeView->Activate(ctx);
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void ui::MainWindow::CheckHistoryAction()
+{
+    const auto action{m_historyView.PendingAction()};
+    if (action == HistoryView::Action::None) return;
+    m_historyView.ClearPendingAction();
+    m_eatNextDblClk = true;
+
+    if (action == HistoryView::Action::Restore)
+        ApplyHistoryRestore();
+
+    SwitchToView(&m_gridView);
+}
+
+void ui::MainWindow::ApplyHistoryRestore()
+{
+    auto data{m_historyView.TakeRestoreData()};
+    m_grid.SetDataForRestore(data.curUser, data.curMachine,
+                             data.snapUser, data.snapMachine,
+                             Environ::core::is_elevated());
+    m_gridView.SetCounts(data.snapUser.size(), data.snapMachine.size());
+}
+
 // --- Data / save ---
 
 void ui::MainWindow::LoadData()
@@ -337,210 +354,6 @@ ui::MainWindow::ReviewGeom ui::MainWindow::ReviewLayout(const D2D1_SIZE_F& sz)
     return g;
 }
 
-// --- History ---
-
-ui::MainWindow::HistoryGeom ui::MainWindow::HistoryLayout(const D2D1_SIZE_F& sz)
-{
-    HistoryGeom hg{};
-    const float cw{std::min(960.0f, sz.width - 60.0f)};
-    const float pad{20.0f};
-    const float titleH{36.0f};
-    const float btnRow{56.0f};
-    const float maxListH{sz.height * 0.6f};
-    const float contentH{HistoryListContentH(hg)};
-    const float listH{std::min(contentH, maxListH)};
-    const float ch{pad + titleH + std::max(listH, 60.0f) + btnRow + pad};
-    const float cx{(sz.width - cw) / 2.0f};
-    const float cy{(sz.height - ch) / 2.0f};
-
-    hg.card = D2D1::RectF(cx, cy, cx + cw, cy + ch);
-    hg.list = D2D1::RectF(cx + pad, cy + pad + titleH, cx + cw - pad,
-                           cy + pad + titleH + std::max(listH, 60.0f));
-
-    constexpr float bw{96.0f};
-    constexpr float bh{34.0f};
-    const float by{hg.card.bottom - pad - bh};
-    hg.restoreBtn = D2D1::RectF(hg.card.right - pad - bw, by, hg.card.right - pad, by + bh);
-    hg.closeBtn = D2D1::RectF(hg.restoreBtn.left - 12.0f - bw, by, hg.restoreBtn.left - 12.0f, by + bh);
-    hg.deleteBtn = D2D1::RectF(hg.card.left + pad, by, hg.card.left + pad + bw, by + bh);
-    return hg;
-}
-
-int ui::MainWindow::HistoryDetailLineCount(int idx)
-{
-    if (idx != m_historySelected || idx < 0) return 0;
-    int count{0};
-    if (!m_historyRecordedTable.empty())
-        count += 1 + static_cast<int>(m_historyRecordedTable.size());
-    if (!m_historyCurrentTable.empty())
-        count += 1 + static_cast<int>(m_historyCurrentTable.size());
-    return count;
-}
-
-float ui::MainWindow::HistoryListContentH(const HistoryGeom& hg)
-{
-    float h{0.0f};
-    for (int i{0}; i < static_cast<int>(m_historySnapshots.size()); ++i)
-    {
-        h += hg.rowH;
-        if (i == m_historySelected)
-            h += static_cast<float>(HistoryDetailLineCount(i)) * hg.detailH;
-    }
-    return h;
-}
-
-void ui::MainWindow::ComputeHistoryTables()
-{
-    using namespace Environ::core;
-    m_historyRecordedTable.clear();
-    m_historyCurrentTable.clear();
-    if (m_historySelected < 0 ||
-        m_historySelected >= static_cast<int>(m_historySnapshots.size()))
-        return;
-
-    const auto& snap{m_historySnapshots[static_cast<size_t>(m_historySelected)]};
-    auto snapVars{m_snapshots.load_snapshot(snap.id)};
-    auto snapUser{reconstruct_variables(snapVars, Scope::User)};
-    auto snapMachine{reconstruct_variables(snapVars, Scope::Machine)};
-
-    // "Difference from current" table.
-    m_historyCurrentTable = build_diff_table(L"Current", L"Snapshot",
-        m_historyCurUser, m_historyCurMachine, snapUser, snapMachine);
-
-    // "Recorded changes" table -- compare against the previous snapshot.
-    const size_t nextIdx{static_cast<size_t>(m_historySelected) + 1};
-    if (nextIdx < m_historySnapshots.size())
-    {
-        auto prevVars{m_snapshots.load_snapshot(m_historySnapshots[nextIdx].id)};
-        auto prevUser{reconstruct_variables(prevVars, Scope::User)};
-        auto prevMachine{reconstruct_variables(prevVars, Scope::Machine)};
-        m_historyRecordedTable = build_diff_table(L"Before", L"After",
-            prevUser, prevMachine, snapUser, snapMachine);
-    }
-    else
-    {
-        // Oldest snapshot -- no previous.
-        std::vector<EnvVariable> empty;
-        m_historyRecordedTable = build_diff_table(L"Before", L"After",
-            empty, empty, snapUser, snapMachine);
-    }
-}
-
-void ui::MainWindow::HistorySelect(int idx)
-{
-    m_historySelected = idx;
-    ComputeHistoryTables();
-}
-
-void ui::MainWindow::DeleteSelectedSnapshot()
-{
-    if (m_historySelected < 0 || m_historySelected >= static_cast<int>(m_historySnapshots.size()))
-        return;
-    const auto id{m_historySnapshots[static_cast<size_t>(m_historySelected)].id};
-    m_snapshots.delete_snapshot(id);
-    m_historySnapshots.erase(m_historySnapshots.begin() + m_historySelected);
-    if (m_historySelected >= static_cast<int>(m_historySnapshots.size()))
-        m_historySelected = static_cast<int>(m_historySnapshots.size()) - 1;
-    ComputeHistoryTables();
-    InvalidateRect(m_hwnd, nullptr, FALSE);
-}
-
-void ui::MainWindow::OpenHistory()
-{
-    using namespace Environ::core;
-    if (m_grid.IsEditing())
-    {
-        const auto ctx{MakeContext()};
-        m_gridView.OnEditEnd(ctx, true, false, false);
-    }
-    m_historySnapshots = m_snapshots.list_snapshots();
-
-    // Read current registry once, reused for all "vs current" comparisons.
-    m_historyCurUser = read_variables(Scope::User);
-    m_historyCurMachine = read_variables(Scope::Machine);
-    expand_and_validate(m_historyCurUser);
-    expand_and_validate(m_historyCurMachine);
-
-    m_historyRecordedTable.clear();
-    m_historyCurrentTable.clear();
-    m_historySelected = -1;
-    m_historyRowHover = -1;
-    m_historyHover = -1;
-    m_historyScroll = 0.0f;
-    m_historyOpen = true;
-    InvalidateRect(m_hwnd, nullptr, FALSE);
-}
-
-void ui::MainWindow::CloseHistory()
-{
-    m_historyOpen = false;
-    InvalidateRect(m_hwnd, nullptr, FALSE);
-}
-
-void ui::MainWindow::RestoreSnapshot()
-{
-    using namespace Environ::core;
-    if (m_historySelected < 0 || m_historySelected >= static_cast<int>(m_historySnapshots.size()))
-        return;
-
-    const auto snapId{m_historySnapshots[static_cast<size_t>(m_historySelected)].id};
-    auto snapVars{m_snapshots.load_snapshot(snapId)};
-
-    // Reconstruct classified + validated variables from the snapshot.
-    auto snapUser{reconstruct_variables(snapVars, Scope::User)};
-    auto snapMachine{reconstruct_variables(snapVars, Scope::Machine)};
-
-    // Read current registry state as the originals for diff computation.
-    auto curUser{read_variables(Scope::User)};
-    auto curMachine{read_variables(Scope::Machine)};
-    expand_and_validate(curUser);
-    expand_and_validate(curMachine);
-    detect_duplicates(curUser, curMachine);
-    detect_duplicates(snapUser, snapMachine);
-
-    m_grid.SetDataForRestore(curUser, curMachine, snapUser, snapMachine, is_elevated());
-    m_gridView.SetCounts(snapUser.size(), snapMachine.size());
-
-    m_historyOpen = false;
-    InvalidateRect(m_hwnd, nullptr, FALSE);
-}
-
-int ui::MainWindow::HistoryRowAtPoint(const HistoryGeom& hg, float x, float y)
-{
-    if (x < hg.list.left || x >= hg.list.right || y < hg.list.top || y >= hg.list.bottom)
-        return -1;
-    float ry{hg.list.top - m_historyScroll};
-    for (int i{0}; i < static_cast<int>(m_historySnapshots.size()); ++i)
-    {
-        float rowBottom{ry + hg.rowH};
-        if (i == m_historySelected)
-            rowBottom += static_cast<float>(HistoryDetailLineCount(i)) * hg.detailH;
-        if (y >= ry && y < rowBottom) return i;
-        ry = rowBottom;
-    }
-    return -1;
-}
-
-void ui::MainWindow::HistoryEnsureVisible(const HistoryGeom& hg, int idx)
-{
-    if (idx < 0 || idx >= static_cast<int>(m_historySnapshots.size())) return;
-    float top{0.0f};
-    for (int i{0}; i < idx; ++i)
-    {
-        top += hg.rowH;
-        if (i == m_historySelected)
-            top += static_cast<float>(HistoryDetailLineCount(i)) * hg.detailH;
-    }
-    float bottom{top + hg.rowH};
-    if (idx == m_historySelected)
-        bottom += static_cast<float>(HistoryDetailLineCount(idx)) * hg.detailH;
-    const float viewH{hg.list.bottom - hg.list.top};
-    if (top < m_historyScroll) m_historyScroll = top;
-    else if (bottom > m_historyScroll + viewH) m_historyScroll = bottom - viewH;
-    const float maxScroll{std::max(0.0f, HistoryListContentH(hg) - viewH)};
-    m_historyScroll = std::clamp(m_historyScroll, 0.0f, maxScroll);
-}
-
 // --- Painting ---
 
 void ui::MainWindow::DrawReviewButton(const D2D1_RECT_F& r, const wchar_t* label,
@@ -595,111 +408,6 @@ void ui::MainWindow::PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F&
     DrawReviewButton(g.applyBtn, L"Apply", true, m_reviewHover == 1, s);
 }
 
-void ui::MainWindow::PaintHistory(const theme::ColorScheme& s, const D2D1_SIZE_F& sz)
-{
-    const HistoryGeom hg{HistoryLayout(sz)};
-
-    // Scrim
-    m_brush->SetColor(s.scrim);
-    m_rt->FillRectangle(D2D1::RectF(0.0f, 0.0f, sz.width, sz.height), m_brush);
-
-    // Card
-    m_brush->SetColor(s.card.fill);
-    m_rt->FillRoundedRectangle(D2D1::RoundedRect(hg.card, 10.0f, 10.0f), m_brush);
-    m_brush->SetColor(s.card.border);
-    m_rt->DrawRoundedRectangle(D2D1::RoundedRect(hg.card, 10.0f, 10.0f), m_brush, 1.0f);
-
-    // Title
-    DrawString(L"History", m_fmtName.get(),
-               D2D1::RectF(hg.card.left + 20.0f, hg.card.top + 12.0f,
-                           hg.card.right - 20.0f, hg.card.top + 44.0f),
-               s.headerText);
-
-    // Snapshot list
-    m_rt->PushAxisAlignedClip(hg.list, D2D1_ANTIALIAS_MODE_ALIASED);
-
-    if (m_historySnapshots.empty())
-    {
-        DrawString(L"No snapshots yet. Snapshots are created when you apply changes.",
-                   m_fmtValue.get(),
-                   D2D1::RectF(hg.list.left + 8.0f, hg.list.top, hg.list.right, hg.list.top + 28.0f),
-                   s.headerSubtext);
-    }
-    else
-    {
-        float y{hg.list.top - m_historyScroll};
-        for (int i{0}; i < static_cast<int>(m_historySnapshots.size()); ++i)
-        {
-            const auto& snap{m_historySnapshots[static_cast<size_t>(i)]};
-            const bool selected{i == m_historySelected};
-            const bool hovered{i == m_historyRowHover && !selected};
-
-            const D2D1_RECT_F rowRect{D2D1::RectF(hg.list.left, y, hg.list.right, y + hg.rowH)};
-
-            // Row background
-            if (selected)
-            {
-                m_brush->SetColor(s.accent);
-                m_rt->FillRectangle(rowRect, m_brush);
-            }
-            else if (hovered)
-            {
-                m_brush->SetColor(s.rowHover.fill);
-                m_rt->FillRectangle(rowRect, m_brush);
-            }
-
-            // Timestamp + label
-            auto ts{FormatTimestamp(snap.timestamp)};
-            auto label{pnq::unicode::to_utf16(snap.label)};
-            auto text{ts + L"  \x2014  " + label};
-            DrawString(text, m_fmtValue.get(),
-                       D2D1::RectF(hg.list.left + 8.0f, y, hg.list.right - 8.0f, y + hg.rowH),
-                       selected ? s.accentText : (hovered ? s.rowHover.text : s.headerText));
-
-            y += hg.rowH;
-
-            // Detail: monospace diff tables for selected snapshot.
-            if (selected)
-            {
-                const auto paintTable = [&](const wchar_t* header,
-                                            const std::vector<std::wstring>& table) {
-                    if (table.empty()) return;
-                    DrawString(header, m_fmtHeader.get(),
-                               D2D1::RectF(hg.list.left + 12.0f, y, hg.list.right - 8.0f, y + hg.detailH),
-                               s.headerSubtext);
-                    y += hg.detailH;
-                    for (const auto& line : table)
-                    {
-                        DrawString(line, m_fmtMono.get(),
-                                   D2D1::RectF(hg.list.left + 4.0f, y, hg.list.right, y + hg.detailH),
-                                   s.headerSubtext);
-                        y += hg.detailH;
-                    }
-                };
-                paintTable(L"Recorded changes:", m_historyRecordedTable);
-                paintTable(L"Difference from current:", m_historyCurrentTable);
-            }
-        }
-    }
-
-    m_rt->PopAxisAlignedClip();
-
-    // Buttons
-    const bool hasSelection{m_historySelected >= 0
-                            && m_historySelected < static_cast<int>(m_historySnapshots.size())};
-    DrawReviewButton(hg.deleteBtn, L"Delete", false, m_historyHover == 2 && hasSelection, s);
-    DrawReviewButton(hg.closeBtn, L"Close", false, m_historyHover == 0, s);
-    DrawReviewButton(hg.restoreBtn, L"Restore", hasSelection, m_historyHover == 1 && hasSelection, s);
-
-    // If no selection, dim the Restore + Delete buttons
-    if (!hasSelection)
-    {
-        m_brush->SetColor(D2D1::ColorF(s.card.fill.r, s.card.fill.g, s.card.fill.b, 0.5f));
-        m_rt->FillRoundedRectangle(D2D1::RoundedRect(hg.restoreBtn, 6.0f, 6.0f), m_brush);
-        m_rt->FillRoundedRectangle(D2D1::RoundedRect(hg.deleteBtn, 6.0f, 6.0f), m_brush);
-    }
-}
-
 void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
 {
     const theme::ColorScheme& s{m_theme.Current()};
@@ -718,7 +426,6 @@ void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
                D2D1::RectF(pad, sz.height - 28.0f, sz.width - pad, sz.height - 8.0f), s.headerSubtext);
 
     if (m_reviewOpen) PaintReview(s, sz);
-    if (m_historyOpen) PaintHistory(s, sz);
 }
 
 // --- Virtual hooks ---
@@ -760,104 +467,6 @@ void ui::MainWindow::OnDestroy()
 
 LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
 {
-    // History modal owns input when open (mutually exclusive with review).
-    if (m_historyOpen)
-    {
-        switch (msg)
-        {
-        case WM_KEYDOWN:
-            if (wp == VK_ESCAPE) { CloseHistory(); return 0; }
-            if (wp == VK_RETURN && m_historySelected >= 0) { RestoreSnapshot(); return 0; }
-            if (wp == VK_DELETE) { DeleteSelectedSnapshot(); return 0; }
-            if (wp == VK_UP || wp == VK_DOWN)
-            {
-                const int n{static_cast<int>(m_historySnapshots.size())};
-                if (n > 0)
-                {
-                    int newSel;
-                    if (wp == VK_UP)
-                        newSel = (m_historySelected <= 0) ? 0 : m_historySelected - 1;
-                    else
-                        newSel = (m_historySelected < 0) ? 0 : std::min(m_historySelected + 1, n - 1);
-                    HistorySelect(newSel);
-                    if (m_rt)
-                    {
-                        const HistoryGeom hg{HistoryLayout(m_rt->GetSize())};
-                        HistoryEnsureVisible(hg, m_historySelected);
-                    }
-                    InvalidateRect(m_hwnd, nullptr, FALSE);
-                }
-                return 0;
-            }
-            return 0;
-        case WM_MOUSEMOVE:
-            if (m_rt)
-            {
-                const float scale{DipScale()};
-                const float x{GET_X_LPARAM(lp) / scale}, my{GET_Y_LPARAM(lp) / scale};
-                const HistoryGeom hg{HistoryLayout(m_rt->GetSize())};
-                bool need{false};
-                const int btnHover{Contains(hg.closeBtn, x, my) ? 0
-                    : (Contains(hg.restoreBtn, x, my) ? 1
-                    : (Contains(hg.deleteBtn, x, my) ? 2 : -1))};
-                if (btnHover != m_historyHover) { m_historyHover = btnHover; need = true; }
-                const int rowHover{HistoryRowAtPoint(hg, x, my)};
-                if (rowHover != m_historyRowHover) { m_historyRowHover = rowHover; need = true; }
-                if (need) InvalidateRect(m_hwnd, nullptr, FALSE);
-            }
-            return 0;
-        case WM_LBUTTONDOWN:
-            if (m_rt)
-            {
-                const float scale{DipScale()};
-                const float x{GET_X_LPARAM(lp) / scale}, my{GET_Y_LPARAM(lp) / scale};
-                const HistoryGeom hg{HistoryLayout(m_rt->GetSize())};
-                if (Contains(hg.closeBtn, x, my))
-                    { m_eatNextDblClk = true; CloseHistory(); }
-                else if (Contains(hg.restoreBtn, x, my) && m_historySelected >= 0)
-                    { m_eatNextDblClk = true; RestoreSnapshot(); }
-                else if (Contains(hg.deleteBtn, x, my) && m_historySelected >= 0)
-                    { m_eatNextDblClk = true; DeleteSelectedSnapshot(); }
-                else if (!Contains(hg.card, x, my))
-                    { m_eatNextDblClk = true; CloseHistory(); }
-                else
-                {
-                    const int row{HistoryRowAtPoint(hg, x, my)};
-                    if (row >= 0 && row != m_historySelected)
-                    {
-                        HistorySelect(row);
-                        InvalidateRect(m_hwnd, nullptr, FALSE);
-                    }
-                    else if (row >= 0 && row == m_historySelected)
-                    {
-                        // Click on already-selected: deselect
-                        HistorySelect(-1);
-                        InvalidateRect(m_hwnd, nullptr, FALSE);
-                    }
-                }
-            }
-            return 0;
-        case WM_MOUSEWHEEL:
-            if (m_rt)
-            {
-                const HistoryGeom hg{HistoryLayout(m_rt->GetSize())};
-                const float viewH{hg.list.bottom - hg.list.top};
-                const float maxScroll{std::max(0.0f, HistoryListContentH(hg) - viewH)};
-                m_historyScroll -= (static_cast<float>(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA) * 3.0f * hg.rowH;
-                m_historyScroll = std::clamp(m_historyScroll, 0.0f, maxScroll);
-                InvalidateRect(m_hwnd, nullptr, FALSE);
-            }
-            return 0;
-        case WM_LBUTTONUP:
-        case WM_LBUTTONDBLCLK:
-        case WM_RBUTTONDOWN:
-        case WM_RBUTTONUP:
-        case WM_CONTEXTMENU:
-            return 0;
-        default:
-            break;
-        }
-    }
     // While the apply-review modal is open it owns input; paint/size/etc. fall through.
     if (m_reviewOpen)
     {
@@ -915,14 +524,28 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         break; // DefWindowProc handles other system keys (Alt+F4, Alt+Space, ...)
     case WM_KEYDOWN:
     {
-        // Global shortcuts first.
-        if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(); return 0; }
-        if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000))
+        // Grid-only shortcuts: Ctrl+S, Ctrl+C.
+        if (m_activeView == &m_gridView)
         {
-            m_gridView.CopyToClipboard(m_grid.CopyText());
+            if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(); return 0; }
+            if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000))
+            {
+                m_gridView.CopyToClipboard(m_grid.CopyText());
+                return 0;
+            }
+        }
+        // Ctrl+H toggles history view.
+        if (wp == 'H' && (GetKeyState(VK_CONTROL) & 0x8000))
+        {
+            if (m_activeView == &m_historyView)
+                SwitchToView(&m_gridView);
+            else
+            {
+                if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
+                SwitchToView(&m_historyView);
+            }
             return 0;
         }
-        if (wp == 'H' && (GetKeyState(VK_CONTROL) & 0x8000)) { OpenHistory(); return 0; }
         if (wp == '0' && (GetKeyState(VK_CONTROL) & 0x8000))
         {
             if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
@@ -955,6 +578,7 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         }
         // Delegate to active view.
         Repaint(m_activeView->OnKey(ctx, static_cast<int>(wp)));
+        CheckHistoryAction();
         return 0;
     }
     case WM_MOUSEMOVE:
@@ -989,6 +613,7 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         const bool shift{(GetKeyState(VK_SHIFT) & 0x8000) != 0};
         const bool ctrl{(GetKeyState(VK_CONTROL) & 0x8000) != 0};
         Repaint(m_activeView->OnLButtonDown(ctx, xDip, yDip, shift, ctrl));
+        CheckHistoryAction();
         return 0;
     }
     case WM_LBUTTONUP:

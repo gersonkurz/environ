@@ -3,6 +3,7 @@
 #include "d2dwindow.h"
 #include "grid.h"
 #include "gridview.h"
+#include "historyview.h"
 #include "AppSettings.h"
 #include "EnvStore.h"
 #include "EnvWriter.h"
@@ -22,11 +23,6 @@ public:
 private:
     // Nested layout types (used in method signatures)
     struct ReviewGeom { D2D1_RECT_F card, list, cancelBtn, applyBtn; };
-    struct HistoryGeom {
-        D2D1_RECT_F card, list, deleteBtn, closeBtn, restoreBtn;
-        float rowH{28.0f};
-        float detailH{16.0f};
-    };
 
     // D2DWindow overrides
     LRESULT HandleMessage(UINT msg, WPARAM wp, LPARAM lp) override;
@@ -44,7 +40,6 @@ private:
     void DrawReviewButton(const D2D1_RECT_F& r, const wchar_t* label,
                           bool primary, bool hover, const theme::ColorScheme& s);
     void PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
-    void PaintHistory(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
 
     // Fonts
     bool CreateFonts();
@@ -61,22 +56,12 @@ private:
     // View plumbing
     ViewContext MakeContext() const;
     D2D1_RECT_F ViewBounds(const D2D1_SIZE_F& sz) const;
+    void SwitchToView(View* view);
+    void CheckHistoryAction();
+    void ApplyHistoryRestore();
 
     // Review layout
     ReviewGeom ReviewLayout(const D2D1_SIZE_F& sz);
-
-    // History
-    HistoryGeom HistoryLayout(const D2D1_SIZE_F& sz);
-    int   HistoryDetailLineCount(int idx);
-    float HistoryListContentH(const HistoryGeom& hg);
-    void  ComputeHistoryTables();
-    void  HistorySelect(int idx);
-    void  DeleteSelectedSnapshot();
-    void  OpenHistory();
-    void  CloseHistory();
-    void  RestoreSnapshot();
-    int   HistoryRowAtPoint(const HistoryGeom& hg, float x, float y);
-    void  HistoryEnsureVisible(const HistoryGeom& hg, int idx);
 
     // === Members ===
 
@@ -96,8 +81,9 @@ private:
     float  m_zoom{1.0f};
 
     // View layer
-    GridView m_gridView{m_grid, m_theme};
-    View*    m_activeView{&m_gridView};
+    GridView    m_gridView{m_grid, m_theme};
+    HistoryView m_historyView{m_snapshots};
+    View*       m_activeView{&m_gridView};
 
     // Review modal
     bool m_reviewOpen{false};
@@ -107,18 +93,6 @@ private:
     std::vector<Environ::core::EnvChange>   m_reviewMachine;
     std::vector<Environ::core::EnvVariable> m_reviewCurUser;
     std::vector<Environ::core::EnvVariable> m_reviewCurMachine;
-
-    // History modal
-    bool  m_historyOpen{false};
-    int   m_historyHover{-1};
-    int   m_historySelected{-1};
-    int   m_historyRowHover{-1};
-    float m_historyScroll{0.0f};
-    std::vector<Environ::core::SnapshotInfo>   m_historySnapshots;
-    std::vector<std::wstring>                  m_historyRecordedTable;
-    std::vector<std::wstring>                  m_historyCurrentTable;
-    std::vector<Environ::core::EnvVariable>    m_historyCurUser;
-    std::vector<Environ::core::EnvVariable>    m_historyCurMachine;
 };
 
 } // namespace ui
