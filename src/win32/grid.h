@@ -105,6 +105,15 @@ namespace ui
         bool IsEditing() const { return m_editing >= 0; }
         bool IsEditingName() const { return m_editing >= 0 && m_editingName; }
 
+        // Restore from snapshot: loads snapshot variables into the grid with current
+        // registry state as originals, so differences show as dirty edits.
+        void SetDataForRestore(
+            const std::vector<Environ::core::EnvVariable>& currentUser,
+            const std::vector<Environ::core::EnvVariable>& currentMachine,
+            const std::vector<Environ::core::EnvVariable>& snapshotUser,
+            const std::vector<Environ::core::EnvVariable>& snapshotMachine,
+            bool elevated);
+
     private:
         struct Row
         {

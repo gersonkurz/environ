@@ -5,6 +5,7 @@
 #include <pnq/unicode.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -343,6 +344,29 @@ bool SnapshotStore::matches_latest_snapshot(
     };
 
     return matches(user_vars, snap_user) && matches(machine_vars, snap_machine);
+}
+
+std::vector<EnvVariable> reconstruct_variables(
+    const std::vector<SnapshotVariable>& snap_vars, Scope scope) {
+
+    std::vector<EnvVariable> result;
+    for (const auto& sv : snap_vars) {
+        if (sv.scope != scope) continue;
+
+        EnvVariable var{};
+        var.name = sv.name;
+        var.value = sv.value;
+        var.is_expandable = sv.is_expandable;
+        var.kind = classify_variable(sv.value, var.segments);
+        result.push_back(std::move(var));
+    }
+
+    std::ranges::sort(result, [](const EnvVariable& a, const EnvVariable& b) {
+        return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+    });
+
+    expand_and_validate(result);
+    return result;
 }
 
 } // namespace Environ::core

@@ -1,7 +1,9 @@
 #include "grid.h"
 
 #include <algorithm>
+#include <cwctype>
 #include <string>
+#include <unordered_map>
 
 namespace ui
 {
@@ -95,6 +97,162 @@ namespace ui
 
         addGroup(userVars, Scope::User, false);
         addGroup(machineVars, Scope::Machine, !elevated);
+    }
+
+    void Grid::SetDataForRestore(
+        const std::vector<Environ::core::EnvVariable>& currentUser,
+        const std::vector<Environ::core::EnvVariable>& currentMachine,
+        const std::vector<Environ::core::EnvVariable>& snapshotUser,
+        const std::vector<Environ::core::EnvVariable>& snapshotMachine,
+        bool elevated)
+    {
+        using Environ::core::EnvVariable;
+        using Environ::core::EnvVariableKind;
+        using Environ::core::Scope;
+
+        // The originals are the CURRENT registry state — compute_diff later compares
+        // current (originals in the grid) vs the snapshot values (displayed in the grid).
+        m_userOrig = currentUser;
+        m_machineOrig = currentMachine;
+        m_rows.clear();
+        m_scrollY = 0.0f;
+        m_hover = -1;
+        m_selected = -1;
+        m_selection.clear();
+        m_editing = -1;
+        m_editingName = false;
+
+        // Build a case-insensitive name→index map for the current (original) variables.
+        const auto buildMap = [](const std::vector<EnvVariable>& vars) {
+            std::unordered_map<std::wstring, int> map;
+            for (int i{0}; i < static_cast<int>(vars.size()); ++i)
+            {
+                std::wstring key{vars[static_cast<size_t>(i)].name};
+                std::ranges::transform(key, key.begin(), ::towlower);
+                map[key] = i;
+            }
+            return map;
+        };
+        auto userMap{buildMap(currentUser)};
+        auto machineMap{buildMap(currentMachine)};
+
+        // Track which originals are referenced, to detect deletions.
+        std::vector<bool> userSeen(currentUser.size(), false);
+        std::vector<bool> machineSeen(currentMachine.size(), false);
+
+        const auto addRestoreGroup = [&](const std::vector<EnvVariable>& snapVars, Scope scope,
+                                         bool readOnly, const std::vector<EnvVariable>& curVars,
+                                         std::unordered_map<std::wstring, int>& curMap,
+                                         std::vector<bool>& seen)
+        {
+            for (int si{0}; si < static_cast<int>(snapVars.size()); ++si)
+            {
+                const EnvVariable& sv{snapVars[static_cast<size_t>(si)]};
+
+                // Find the matching current variable (by name, case-insensitive).
+                std::wstring key{sv.name};
+                std::ranges::transform(key, key.begin(), ::towlower);
+                auto it{curMap.find(key)};
+                const int origIdx{it != curMap.end() ? it->second : -1};
+                if (origIdx >= 0) seen[static_cast<size_t>(origIdx)] = true;
+
+                Row var{};
+                var.kind = Row::Kind::Variable;
+                var.col1 = sv.name;
+                var.col1Original = sv.name;
+                var.depth = 0;
+                var.readOnly = readOnly;
+                var.scope = scope;
+                var.varIndex = origIdx; // -1 if new in snapshot (absent from registry)
+                var.segIndex = -1;
+
+                if (sv.kind == EnvVariableKind::PathList && !sv.segments.empty())
+                {
+                    // Snapshot value for col2; original from current registry for dirty detection.
+                    var.col2 = sv.segments[0];
+                    var.segIndex = 0;
+
+                    if (origIdx >= 0 && curVars[static_cast<size_t>(origIdx)].kind == EnvVariableKind::PathList
+                        && !curVars[static_cast<size_t>(origIdx)].segments.empty())
+                        var.original = curVars[static_cast<size_t>(origIdx)].segments[0];
+                    else
+                        var.original = L""; // new or type-changed → always dirty
+
+                    var.invalid = !sv.segment_valid.empty() && !sv.segment_valid[0];
+                    var.duplicate = !sv.segment_duplicate.empty() && !sv.segment_duplicate[0].empty();
+                    m_rows.push_back(std::move(var));
+
+                    for (size_t i{1}; i < sv.segments.size(); ++i)
+                    {
+                        Row seg{};
+                        seg.kind = Row::Kind::Segment;
+                        seg.col2 = sv.segments[i];
+                        seg.depth = 1;
+                        seg.readOnly = readOnly;
+                        seg.scope = scope;
+                        seg.varIndex = origIdx;
+                        seg.segIndex = static_cast<int>(i);
+
+                        if (origIdx >= 0 && curVars[static_cast<size_t>(origIdx)].kind == EnvVariableKind::PathList
+                            && i < curVars[static_cast<size_t>(origIdx)].segments.size())
+                            seg.original = curVars[static_cast<size_t>(origIdx)].segments[i];
+                        else
+                            seg.original = L"";
+
+                        seg.invalid = (i < sv.segment_valid.size()) && !sv.segment_valid[i];
+                        seg.duplicate = (i < sv.segment_duplicate.size()) && !sv.segment_duplicate[i].empty();
+                        m_rows.push_back(std::move(seg));
+                    }
+                }
+                else
+                {
+                    var.col2 = sv.value;
+                    if (origIdx >= 0)
+                        var.original = curVars[static_cast<size_t>(origIdx)].value;
+                    else
+                        var.original = L""; // new → dirty
+                    m_rows.push_back(std::move(var));
+                }
+            }
+        };
+
+        addRestoreGroup(snapshotUser, Scope::User, false, currentUser, userMap, userSeen);
+        addRestoreGroup(snapshotMachine, Scope::Machine, !elevated, currentMachine, machineMap, machineSeen);
+
+        // Structural flags: mark originals that differ structurally from their snapshot
+        // counterpart, or that are absent from the snapshot (deletions).
+        m_userStruct.assign(currentUser.size(), false);
+        m_machineStruct.assign(currentMachine.size(), false);
+
+        // Mark unseen originals as structurally edited (they become deletions).
+        for (size_t i{0}; i < userSeen.size(); ++i)
+            if (!userSeen[i]) m_userStruct[i] = true;
+        for (size_t i{0}; i < machineSeen.size(); ++i)
+            if (!machineSeen[i]) m_machineStruct[i] = true;
+
+        // Mark any variable where the snapshot segment count differs from the original
+        // (structural change needed for correct reconstruction by CurrentVars).
+        for (const auto& r : m_rows)
+        {
+            if (r.kind != Row::Kind::Variable || r.varIndex < 0) continue;
+            const auto& curVars{(r.scope == Scope::User) ? currentUser : currentMachine};
+            auto& flags{(r.scope == Scope::User) ? m_userStruct : m_machineStruct};
+            if (r.varIndex >= static_cast<int>(curVars.size())) continue;
+            const auto& cv{curVars[static_cast<size_t>(r.varIndex)]};
+            const auto& snapVars{(r.scope == Scope::User) ? snapshotUser : snapshotMachine};
+
+            // Find the snapshot variable by name
+            for (const auto& sv : snapVars)
+            {
+                if (_wcsicmp(sv.name.c_str(), cv.name.c_str()) == 0)
+                {
+                    if (sv.kind != cv.kind
+                        || (sv.kind == EnvVariableKind::PathList && sv.segments.size() != cv.segments.size()))
+                        flags[static_cast<size_t>(r.varIndex)] = true;
+                    break;
+                }
+            }
+        }
     }
 
     bool Grid::HasChanges() const
@@ -191,8 +349,17 @@ namespace ui
             {
                 EnvVariable nv{};
                 nv.name = name;
-                nv.value = entries.empty() ? std::wstring{} : entries.front();
-                nv.kind = EnvVariableKind::Scalar;
+                if (entries.size() > 1)
+                {
+                    nv.segments = entries;
+                    nv.value = Environ::core::join_segments(entries);
+                    nv.kind = EnvVariableKind::PathList;
+                }
+                else
+                {
+                    nv.value = entries.empty() ? std::wstring{} : entries.front();
+                    nv.kind = EnvVariableKind::Scalar;
+                }
                 nv.is_expandable = false;
                 newVars.push_back(std::move(nv));
                 continue;

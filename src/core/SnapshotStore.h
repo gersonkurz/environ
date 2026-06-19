@@ -67,4 +67,9 @@ private:
     bool ensure_schema();
 };
 
+// Reconstruct grid-ready EnvVariables from snapshot data for a given scope.
+// Performs classification + expand_and_validate so the result can go straight into the grid.
+std::vector<EnvVariable> reconstruct_variables(
+    const std::vector<SnapshotVariable>& snap_vars, Scope scope);
+
 } // namespace Environ::core

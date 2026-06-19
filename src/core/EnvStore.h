@@ -51,6 +51,11 @@ std::wstring join_segments(std::vector<std::wstring> const& segments);
 std::wstring apply_segment_edits(std::wstring const& original_value,
                                  std::vector<std::wstring> const& edited_segments);
 
+// Classify a value as Scalar or PathList and split into segments (if path-list).
+// Used by SnapshotStore to reconstruct variables from snapshot data.
+EnvVariableKind classify_variable(std::wstring_view value,
+                                   std::vector<std::wstring>& segments);
+
 // Returns true if the current process is running elevated (admin).
 bool is_elevated();
 

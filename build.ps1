@@ -44,7 +44,7 @@ Copy-Item (Join-Path $srcDir 'theme.toml') $out -Force
 # files actually used are compiled — read-only Phase 1 needs just EnvStore.
 $hostSources = @(Get-ChildItem $srcDir -Filter *.cpp | ForEach-Object { $_.FullName })
 if (-not $hostSources) { throw "no sources in $srcDir" }
-$coreSources = @('EnvStore.cpp', 'EnvWriter.cpp') | ForEach-Object { Join-Path $root "src\core\$_" }
+$coreSources = @('EnvStore.cpp', 'EnvWriter.cpp', 'SnapshotStore.cpp') | ForEach-Object { Join-Path $root "src\core\$_" }
 $sources = $hostSources + $coreSources
 
 # Our code (src/core, src/win32) is policed at /W4 /WX. Third-party headers are external:
@@ -52,10 +52,23 @@ $sources = $hostSources + $coreSources
 # toml++ + the STL want exceptions on to compile clean; we keep our own code throw-free
 # and run toml++ in no-throw mode (TOML_EXCEPTIONS=0). /utf-8 is required by spdlog's fmt.
 $coreInc = Join-Path $root 'src\core'
+$sqliteInc = Join-Path $root 'extern\sqlite3-amalgamation\src\sqlite3'
 $extInc = @('tomlplusplus\include', 'pnq\include', 'spdlog\include') |
     ForEach-Object { Join-Path $root "extern\$_" }
-foreach ($d in @($coreInc) + $extInc) {
+foreach ($d in @($coreInc, $sqliteInc) + $extInc) {
     if (-not (Test-Path $d)) { throw "include dir not found: $d (git submodule update --init --recursive?)" }
+}
+
+# --- compile sqlite3.c separately (third-party C, /W0 — can't pass /W4 /WX) ---
+$sqliteSrc = Join-Path $sqliteInc 'sqlite3.c'
+$sqliteObj = Join-Path $out 'sqlite3.obj'
+$sqliteNeedsBuild = (-not (Test-Path $sqliteObj)) -or
+    ((Get-Item $sqliteSrc).LastWriteTimeUtc -gt (Get-Item $sqliteObj).LastWriteTimeUtc)
+if ($sqliteNeedsBuild) {
+    Write-Host "Compiling sqlite3.c for $Arch..." -ForegroundColor Cyan
+    & cl /nologo /W0 /O2 /MT /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX `
+        /c "/Fo:$sqliteObj" $sqliteSrc
+    if ($LASTEXITCODE -ne 0) { throw "sqlite3 build failed (cl exit $LASTEXITCODE)" }
 }
 
 $clArgs = @(
@@ -63,11 +76,11 @@ $clArgs = @(
     '/DUNICODE', '/D_UNICODE', '/DWIN32_LEAN_AND_MEAN', '/DNOMINMAX',
     '/I', $coreInc,
     '/external:anglebrackets', '/external:W0'
-) + ($extInc | ForEach-Object { @('/external:I', $_) }) + @(
+) + @('/external:I', $sqliteInc) + ($extInc | ForEach-Object { @('/external:I', $_) }) + @(
     "/Fo:$out\", "/Fe:$exe"
-) + $sources + @(
+) + $sources + $sqliteObj + @(
     '/link', '/SUBSYSTEM:WINDOWS',
-    'd2d1.lib', 'dwrite.lib', 'dwmapi.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib', 'advapi32.lib', 'comctl32.lib'
+    'd2d1.lib', 'dwrite.lib', 'dwmapi.lib', 'user32.lib', 'gdi32.lib', 'ole32.lib', 'advapi32.lib', 'comctl32.lib', 'shell32.lib'
 )
 
 Write-Host "Compiling $($sources.Count) file(s) for $Arch..." -ForegroundColor Cyan

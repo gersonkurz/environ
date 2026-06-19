@@ -76,27 +76,6 @@ std::vector<std::wstring> split_segments(std::wstring_view value) {
     return segments;
 }
 
-EnvVariableKind classify_variable(std::wstring_view value, std::vector<std::wstring>& segments) {
-    segments = split_segments(value);
-    if (segments.size() <= 1) {
-        return EnvVariableKind::Scalar;
-    }
-
-    std::size_t path_like_segments{0};
-    for (const auto& segment : segments) {
-        if (looks_like_path_segment(segment)) {
-            ++path_like_segments;
-        }
-    }
-
-    if (path_like_segments * 2 >= segments.size()) {
-        return EnvVariableKind::PathList;
-    }
-
-    segments.clear();
-    return EnvVariableKind::Scalar;
-}
-
 std::wstring expand_env_string(std::wstring const& input) {
     auto required{ExpandEnvironmentStringsW(input.c_str(), nullptr, 0)};
     if (required == 0) {
@@ -117,6 +96,27 @@ bool path_exists(std::wstring const& path) {
 }
 
 } // namespace
+
+EnvVariableKind classify_variable(std::wstring_view value, std::vector<std::wstring>& segments) {
+    segments = split_segments(value);
+    if (segments.size() <= 1) {
+        return EnvVariableKind::Scalar;
+    }
+
+    std::size_t path_like_segments{0};
+    for (const auto& segment : segments) {
+        if (looks_like_path_segment(segment)) {
+            ++path_like_segments;
+        }
+    }
+
+    if (path_like_segments * 2 >= segments.size()) {
+        return EnvVariableKind::PathList;
+    }
+
+    segments.clear();
+    return EnvVariableKind::Scalar;
+}
 
 std::vector<EnvVariable> read_variables(Scope scope) {
     std::vector<EnvVariable> result;

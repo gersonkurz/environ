@@ -11,16 +11,22 @@
 #include <dwrite.h>
 #include <dwmapi.h>
 #include <algorithm>
+#include <cwctype>
 #include <format>
+#include <map>
+#include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include <pnq/unicode.h>
 #include <spdlog/spdlog.h>
 
 #include "theme.h"
 #include "grid.h"
 #include "EnvStore.h"
 #include "EnvWriter.h"
+#include "SnapshotStore.h"
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
@@ -61,9 +67,11 @@ namespace
     IDWriteTextFormat* g_fmtHeader{nullptr};
     IDWriteTextFormat* g_fmtGlyph{nullptr};
     IDWriteTextFormat* g_fmtButton{nullptr}; // centered button label
+    IDWriteTextFormat* g_fmtMono{nullptr};   // monospace for diff tables
 
     theme::ThemeSet g_theme;
     ui::Grid g_grid;
+    Environ::core::SnapshotStore g_snapshots;
     size_t g_userCount{0};
     size_t g_machineCount{0};
     bool g_elevated{false};
@@ -83,6 +91,18 @@ namespace
     std::vector<Environ::core::EnvChange> g_reviewMachine;
     std::vector<Environ::core::EnvVariable> g_reviewCurUser;
     std::vector<Environ::core::EnvVariable> g_reviewCurMachine;
+
+    // History modal state (Phase 5B).
+    bool g_historyOpen{false};
+    int g_historyHover{-1};       // button: 0=Close, 1=Restore, 2=Delete
+    int g_historySelected{-1};    // selected snapshot index
+    int g_historyRowHover{-1};    // hovered row
+    float g_historyScroll{0.0f};
+    std::vector<Environ::core::SnapshotInfo> g_historySnapshots;
+    std::vector<std::wstring> g_historyRecordedTable;  // snapshot vs previous: table lines
+    std::vector<std::wstring> g_historyCurrentTable;   // snapshot vs registry: table lines
+    std::vector<Environ::core::EnvVariable> g_historyCurUser;    // cached current registry
+    std::vector<Environ::core::EnvVariable> g_historyCurMachine;
 
     bool Contains(const D2D1_RECT_F& r, float x, float y)
     {
@@ -155,7 +175,7 @@ namespace
     void ReleaseGraphics()
     {
         DiscardDeviceResources();
-        for (IDWriteTextFormat** fmt : {&g_fmtCaption, &g_fmtSub, &g_fmtName, &g_fmtValue, &g_fmtHeader, &g_fmtGlyph, &g_fmtButton})
+        for (IDWriteTextFormat** fmt : {&g_fmtCaption, &g_fmtSub, &g_fmtName, &g_fmtValue, &g_fmtHeader, &g_fmtGlyph, &g_fmtButton, &g_fmtMono})
         {
             if (*fmt) { (*fmt)->Release(); *fmt = nullptr; }
         }
@@ -301,6 +321,468 @@ namespace
         DrawReviewButton(g.applyBtn, L"Apply", true, g_reviewHover == 1, s);
     }
 
+    // --- History modal (Phase 5B) ---
+
+    struct HistoryGeom
+    {
+        D2D1_RECT_F card;
+        D2D1_RECT_F list;     // scrollable snapshot list
+        D2D1_RECT_F deleteBtn;
+        D2D1_RECT_F closeBtn;
+        D2D1_RECT_F restoreBtn;
+        float rowH{28.0f};
+        float detailH{16.0f};
+    };
+
+    // Total detail lines for the selected snapshot: both table sections + section headers.
+    int HistoryDetailLineCount(int idx)
+    {
+        if (idx != g_historySelected || idx < 0) return 0;
+        int count{0};
+        if (!g_historyRecordedTable.empty())
+            count += 1 + static_cast<int>(g_historyRecordedTable.size());
+        if (!g_historyCurrentTable.empty())
+            count += 1 + static_cast<int>(g_historyCurrentTable.size());
+        return count;
+    }
+
+    float HistoryListContentH(const HistoryGeom& hg)
+    {
+        float h{0.0f};
+        for (int i{0}; i < static_cast<int>(g_historySnapshots.size()); ++i)
+        {
+            h += hg.rowH;
+            if (i == g_historySelected)
+                h += static_cast<float>(HistoryDetailLineCount(i)) * hg.detailH;
+        }
+        return h;
+    }
+
+    HistoryGeom HistoryLayout(const D2D1_SIZE_F& sz)
+    {
+        HistoryGeom hg{};
+        const float cw{std::min(960.0f, sz.width - 60.0f)};
+        const float pad{20.0f};
+        const float titleH{36.0f};
+        const float btnRow{56.0f};
+        const float maxListH{sz.height * 0.6f};
+        const float contentH{HistoryListContentH(hg)};
+        const float listH{std::min(contentH, maxListH)};
+        const float ch{pad + titleH + std::max(listH, 60.0f) + btnRow + pad};
+        const float cx{(sz.width - cw) / 2.0f};
+        const float cy{(sz.height - ch) / 2.0f};
+
+        hg.card = D2D1::RectF(cx, cy, cx + cw, cy + ch);
+        hg.list = D2D1::RectF(cx + pad, cy + pad + titleH, cx + cw - pad,
+                               cy + pad + titleH + std::max(listH, 60.0f));
+
+        constexpr float bw{96.0f};
+        constexpr float bh{34.0f};
+        const float by{hg.card.bottom - pad - bh};
+        hg.restoreBtn = D2D1::RectF(hg.card.right - pad - bw, by, hg.card.right - pad, by + bh);
+        hg.closeBtn = D2D1::RectF(hg.restoreBtn.left - 12.0f - bw, by, hg.restoreBtn.left - 12.0f, by + bh);
+        hg.deleteBtn = D2D1::RectF(hg.card.left + pad, by, hg.card.left + pad + bw, by + bh);
+        return hg;
+    }
+
+    // Format "2026-06-18T14:22:05Z" as "2026-06-18  14:22:05"
+    std::wstring FormatTimestamp(const std::string& ts)
+    {
+        std::wstring w;
+        w.reserve(ts.size());
+        for (char c : ts) w.push_back(static_cast<wchar_t>(c));
+        if (w.size() >= 11 && w[10] == L'T')
+        {
+            w[10] = L' ';
+            w.insert(10, 1, L' ');
+        }
+        if (!w.empty() && w.back() == L'Z') w.pop_back();
+        return w;
+    }
+
+    void PaintHistory(const theme::ColorScheme& s, const D2D1_SIZE_F& sz)
+    {
+        const HistoryGeom hg{HistoryLayout(sz)};
+
+        // Scrim
+        g_brush->SetColor(s.scrim);
+        g_rt->FillRectangle(D2D1::RectF(0.0f, 0.0f, sz.width, sz.height), g_brush);
+
+        // Card
+        g_brush->SetColor(s.card.fill);
+        g_rt->FillRoundedRectangle(D2D1::RoundedRect(hg.card, 10.0f, 10.0f), g_brush);
+        g_brush->SetColor(s.card.border);
+        g_rt->DrawRoundedRectangle(D2D1::RoundedRect(hg.card, 10.0f, 10.0f), g_brush, 1.0f);
+
+        // Title
+        DrawString(L"History", g_fmtName,
+                   D2D1::RectF(hg.card.left + 20.0f, hg.card.top + 12.0f,
+                               hg.card.right - 20.0f, hg.card.top + 44.0f),
+                   s.headerText);
+
+        // Snapshot list
+        g_rt->PushAxisAlignedClip(hg.list, D2D1_ANTIALIAS_MODE_ALIASED);
+
+        if (g_historySnapshots.empty())
+        {
+            DrawString(L"No snapshots yet. Snapshots are created when you apply changes.",
+                       g_fmtValue,
+                       D2D1::RectF(hg.list.left + 8.0f, hg.list.top, hg.list.right, hg.list.top + 28.0f),
+                       s.headerSubtext);
+        }
+        else
+        {
+            float y{hg.list.top - g_historyScroll};
+            for (int i{0}; i < static_cast<int>(g_historySnapshots.size()); ++i)
+            {
+                const auto& snap{g_historySnapshots[static_cast<size_t>(i)]};
+                const bool selected{i == g_historySelected};
+                const bool hovered{i == g_historyRowHover && !selected};
+
+                const D2D1_RECT_F rowRect{D2D1::RectF(hg.list.left, y, hg.list.right, y + hg.rowH)};
+
+                // Row background
+                if (selected)
+                {
+                    g_brush->SetColor(s.accent);
+                    g_rt->FillRectangle(rowRect, g_brush);
+                }
+                else if (hovered)
+                {
+                    g_brush->SetColor(s.rowHover.fill);
+                    g_rt->FillRectangle(rowRect, g_brush);
+                }
+
+                // Timestamp + label
+                auto ts{FormatTimestamp(snap.timestamp)};
+                auto label{pnq::unicode::to_utf16(snap.label)};
+                auto text{ts + L"  \x2014  " + label};
+                DrawString(text, g_fmtValue,
+                           D2D1::RectF(hg.list.left + 8.0f, y, hg.list.right - 8.0f, y + hg.rowH),
+                           selected ? s.accentText : (hovered ? s.rowHover.text : s.headerText));
+
+                y += hg.rowH;
+
+                // Detail: monospace diff tables for selected snapshot.
+                if (selected)
+                {
+                    const auto paintTable = [&](const wchar_t* header,
+                                                const std::vector<std::wstring>& table) {
+                        if (table.empty()) return;
+                        DrawString(header, g_fmtHeader,
+                                   D2D1::RectF(hg.list.left + 12.0f, y, hg.list.right - 8.0f, y + hg.detailH),
+                                   s.headerSubtext);
+                        y += hg.detailH;
+                        for (const auto& line : table)
+                        {
+                            DrawString(line, g_fmtMono,
+                                       D2D1::RectF(hg.list.left + 4.0f, y, hg.list.right, y + hg.detailH),
+                                       s.headerSubtext);
+                            y += hg.detailH;
+                        }
+                    };
+                    paintTable(L"Recorded changes:", g_historyRecordedTable);
+                    paintTable(L"Difference from current:", g_historyCurrentTable);
+                }
+            }
+        }
+
+        g_rt->PopAxisAlignedClip();
+
+        // Buttons
+        const bool hasSelection{g_historySelected >= 0
+                                && g_historySelected < static_cast<int>(g_historySnapshots.size())};
+        DrawReviewButton(hg.deleteBtn, L"Delete", false, g_historyHover == 2 && hasSelection, s);
+        DrawReviewButton(hg.closeBtn, L"Close", false, g_historyHover == 0, s);
+        DrawReviewButton(hg.restoreBtn, L"Restore", hasSelection, g_historyHover == 1 && hasSelection, s);
+
+        // If no selection, dim the Restore + Delete buttons
+        if (!hasSelection)
+        {
+            g_brush->SetColor(D2D1::ColorF(s.card.fill.r, s.card.fill.g, s.card.fill.b, 0.5f));
+            g_rt->FillRoundedRectangle(D2D1::RoundedRect(hg.restoreBtn, 6.0f, 6.0f), g_brush);
+            g_rt->FillRoundedRectangle(D2D1::RoundedRect(hg.deleteBtn, 6.0f, 6.0f), g_brush);
+        }
+    }
+
+    void CloseHistory(HWND hwnd)
+    {
+        g_historyOpen = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
+    void RestoreSnapshot(HWND hwnd)
+    {
+        using namespace Environ::core;
+        if (g_historySelected < 0 || g_historySelected >= static_cast<int>(g_historySnapshots.size()))
+            return;
+
+        const auto snapId{g_historySnapshots[static_cast<size_t>(g_historySelected)].id};
+        auto snapVars{g_snapshots.load_snapshot(snapId)};
+
+        // Reconstruct classified + validated variables from the snapshot.
+        auto snapUser{reconstruct_variables(snapVars, Scope::User)};
+        auto snapMachine{reconstruct_variables(snapVars, Scope::Machine)};
+
+        // Read current registry state as the originals for diff computation.
+        auto curUser{read_variables(Scope::User)};
+        auto curMachine{read_variables(Scope::Machine)};
+        expand_and_validate(curUser);
+        expand_and_validate(curMachine);
+        detect_duplicates(curUser, curMachine);
+        detect_duplicates(snapUser, snapMachine);
+
+        g_grid.SetDataForRestore(curUser, curMachine, snapUser, snapMachine, g_elevated);
+        g_userCount = snapUser.size();
+        g_machineCount = snapMachine.size();
+
+        g_historyOpen = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
+    void EndEdit(HWND hwnd, bool commit); // forward decl; defined below
+
+    // --- Diff table builder ---
+    // Builds a monospace text table comparing two sets of environment variables.
+    // Only changed variables are shown. For path-list variables with any difference,
+    // all segments on both sides are shown so reordering is visible.
+
+    std::vector<std::wstring> BuildDiffTable(
+        const wchar_t* leftLabel,
+        const wchar_t* rightLabel,
+        const std::vector<Environ::core::EnvVariable>& leftUser,
+        const std::vector<Environ::core::EnvVariable>& leftMachine,
+        const std::vector<Environ::core::EnvVariable>& rightUser,
+        const std::vector<Environ::core::EnvVariable>& rightMachine)
+    {
+        using Environ::core::EnvVariable;
+        using Environ::core::EnvVariableKind;
+
+        struct TableRow { std::wstring name, left, right; };
+        std::vector<TableRow> rows;
+
+        const auto toLower = [](std::wstring s) {
+            std::ranges::transform(s, s.begin(), ::towlower);
+            return s;
+        };
+
+        const auto addScope = [&](const wchar_t* scope,
+                                   const std::vector<EnvVariable>& lv,
+                                   const std::vector<EnvVariable>& rv) {
+            // Build name→variable maps.
+            std::map<std::wstring, const EnvVariable*> leftMap, rightMap;
+            for (const auto& v : lv) leftMap[toLower(v.name)] = &v;
+            for (const auto& v : rv) rightMap[toLower(v.name)] = &v;
+
+            // Collect all names, sorted case-insensitively.
+            std::set<std::wstring> keys;
+            for (const auto& [k, _] : leftMap) keys.insert(k);
+            for (const auto& [k, _] : rightMap) keys.insert(k);
+
+            for (const auto& key : keys)
+            {
+                auto itL{leftMap.find(key)};
+                auto itR{rightMap.find(key)};
+                const EnvVariable* left{itL != leftMap.end() ? itL->second : nullptr};
+                const EnvVariable* right{itR != rightMap.end() ? itR->second : nullptr};
+
+                // Skip unchanged.
+                if (left && right && left->value == right->value) continue;
+
+                const std::wstring dispName{std::wstring{scope} + L" " +
+                    (right ? right->name : left->name)};
+
+                const bool leftPath{left && left->kind == EnvVariableKind::PathList && !left->segments.empty()};
+                const bool rightPath{right && right->kind == EnvVariableKind::PathList && !right->segments.empty()};
+
+                if (leftPath || rightPath)
+                {
+                    // Path-list: show all segments side by side.
+                    const auto& lSegs{leftPath ? left->segments : std::vector<std::wstring>{}};
+                    const auto& rSegs{rightPath ? right->segments : std::vector<std::wstring>{}};
+                    const size_t maxSegs{std::max(lSegs.size(), rSegs.size())};
+
+                    rows.push_back({dispName,
+                                    left ? L"" : L"(not set)",
+                                    right ? L"" : L"(not set)"});
+                    for (size_t s{0}; s < maxSegs; ++s)
+                    {
+                        rows.push_back({L"",
+                                        s < lSegs.size() ? lSegs[s] : L"",
+                                        s < rSegs.size() ? rSegs[s] : L""});
+                    }
+                }
+                else
+                {
+                    // Scalar: one row.
+                    rows.push_back({dispName,
+                                    left ? left->value : L"(not set)",
+                                    right ? right->value : L"(not set)"});
+                }
+            }
+        };
+
+        addScope(L"[User]", leftUser, rightUser);
+        addScope(L"[Machine]", leftMachine, rightMachine);
+
+        if (rows.empty())
+            return {L"  No differences"};
+
+        // Compute column widths from content.
+        size_t nameW{wcslen(L"Variable")};
+        size_t leftW{wcslen(leftLabel)};
+        size_t rightW{wcslen(rightLabel)};
+        for (const auto& r : rows)
+        {
+            nameW = std::max(nameW, r.name.size());
+            leftW = std::max(leftW, r.left.size());
+            rightW = std::max(rightW, r.right.size());
+        }
+        // Cap to keep things reasonable; clipping handles overflow.
+        nameW = std::min(nameW, size_t{26});
+        leftW = std::min(leftW, size_t{52});
+        rightW = std::min(rightW, size_t{52});
+
+        const auto pad = [](const std::wstring& s, size_t w) {
+            if (s.size() >= w) return s.substr(0, w);
+            return s + std::wstring(w - s.size(), L' ');
+        };
+
+        std::vector<std::wstring> lines;
+        lines.reserve(rows.size() + 2);
+
+        // Header.
+        lines.push_back(L" " + pad(L"Variable", nameW) + L" \x2502 " +
+                         pad(std::wstring{leftLabel}, leftW) + L" \x2502 " +
+                         pad(std::wstring{rightLabel}, rightW));
+        // Separator.
+        lines.push_back(L" " + std::wstring(nameW, L'\x2500') + L"\x2500\x253C\x2500" +
+                         std::wstring(leftW, L'\x2500') + L"\x2500\x253C\x2500" +
+                         std::wstring(rightW, L'\x2500'));
+        // Data rows.
+        for (const auto& r : rows)
+        {
+            lines.push_back(L" " + pad(r.name, nameW) + L" \x2502 " +
+                             pad(r.left, leftW) + L" \x2502 " +
+                             pad(r.right, rightW));
+        }
+        return lines;
+    }
+
+    void ComputeHistoryTables()
+    {
+        using namespace Environ::core;
+        g_historyRecordedTable.clear();
+        g_historyCurrentTable.clear();
+        if (g_historySelected < 0 ||
+            g_historySelected >= static_cast<int>(g_historySnapshots.size()))
+            return;
+
+        const auto& snap{g_historySnapshots[static_cast<size_t>(g_historySelected)]};
+        auto snapVars{g_snapshots.load_snapshot(snap.id)};
+        auto snapUser{reconstruct_variables(snapVars, Scope::User)};
+        auto snapMachine{reconstruct_variables(snapVars, Scope::Machine)};
+
+        // "Difference from current" table.
+        g_historyCurrentTable = BuildDiffTable(L"Current", L"Snapshot",
+            g_historyCurUser, g_historyCurMachine, snapUser, snapMachine);
+
+        // "Recorded changes" table — compare against the previous snapshot.
+        const size_t nextIdx{static_cast<size_t>(g_historySelected) + 1};
+        if (nextIdx < g_historySnapshots.size())
+        {
+            auto prevVars{g_snapshots.load_snapshot(g_historySnapshots[nextIdx].id)};
+            auto prevUser{reconstruct_variables(prevVars, Scope::User)};
+            auto prevMachine{reconstruct_variables(prevVars, Scope::Machine)};
+            g_historyRecordedTable = BuildDiffTable(L"Before", L"After",
+                prevUser, prevMachine, snapUser, snapMachine);
+        }
+        else
+        {
+            // Oldest snapshot — no previous.
+            std::vector<EnvVariable> empty;
+            g_historyRecordedTable = BuildDiffTable(L"Before", L"After",
+                empty, empty, snapUser, snapMachine);
+        }
+    }
+
+    void HistorySelect(int idx)
+    {
+        g_historySelected = idx;
+        ComputeHistoryTables();
+    }
+
+    void DeleteSelectedSnapshot(HWND hwnd)
+    {
+        if (g_historySelected < 0 || g_historySelected >= static_cast<int>(g_historySnapshots.size()))
+            return;
+        const auto id{g_historySnapshots[static_cast<size_t>(g_historySelected)].id};
+        g_snapshots.delete_snapshot(id);
+        g_historySnapshots.erase(g_historySnapshots.begin() + g_historySelected);
+        if (g_historySelected >= static_cast<int>(g_historySnapshots.size()))
+            g_historySelected = static_cast<int>(g_historySnapshots.size()) - 1;
+        ComputeHistoryTables();
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
+    void OpenHistory(HWND hwnd)
+    {
+        using namespace Environ::core;
+        if (g_grid.IsEditing()) EndEdit(hwnd, true);
+        g_historySnapshots = g_snapshots.list_snapshots();
+
+        // Read current registry once, reused for all "vs current" comparisons.
+        g_historyCurUser = read_variables(Scope::User);
+        g_historyCurMachine = read_variables(Scope::Machine);
+        expand_and_validate(g_historyCurUser);
+        expand_and_validate(g_historyCurMachine);
+
+        g_historyRecordedTable.clear();
+        g_historyCurrentTable.clear();
+        g_historySelected = -1;
+        g_historyRowHover = -1;
+        g_historyHover = -1;
+        g_historyScroll = 0.0f;
+        g_historyOpen = true;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
+    int HistoryRowAtPoint(const HistoryGeom& hg, float x, float y)
+    {
+        if (x < hg.list.left || x >= hg.list.right || y < hg.list.top || y >= hg.list.bottom)
+            return -1;
+        float ry{hg.list.top - g_historyScroll};
+        for (int i{0}; i < static_cast<int>(g_historySnapshots.size()); ++i)
+        {
+            float rowBottom{ry + hg.rowH};
+            if (i == g_historySelected)
+                rowBottom += static_cast<float>(HistoryDetailLineCount(i)) * hg.detailH;
+            if (y >= ry && y < rowBottom) return i;
+            ry = rowBottom;
+        }
+        return -1;
+    }
+
+    void HistoryEnsureVisible(const HistoryGeom& hg, int idx)
+    {
+        if (idx < 0 || idx >= static_cast<int>(g_historySnapshots.size())) return;
+        float top{0.0f};
+        for (int i{0}; i < idx; ++i)
+        {
+            top += hg.rowH;
+            if (i == g_historySelected)
+                top += static_cast<float>(HistoryDetailLineCount(i)) * hg.detailH;
+        }
+        float bottom{top + hg.rowH};
+        if (idx == g_historySelected)
+            bottom += static_cast<float>(HistoryDetailLineCount(idx)) * hg.detailH;
+        const float viewH{hg.list.bottom - hg.list.top};
+        if (top < g_historyScroll) g_historyScroll = top;
+        else if (bottom > g_historyScroll + viewH) g_historyScroll = bottom - viewH;
+        const float maxScroll{std::max(0.0f, HistoryListContentH(hg) - viewH)};
+        g_historyScroll = std::clamp(g_historyScroll, 0.0f, maxScroll);
+    }
+
     void Paint(HWND hwnd)
     {
         if (FAILED(EnsureRenderTarget(hwnd))) return;
@@ -348,13 +830,14 @@ namespace
         }
 
         const std::wstring footer = std::format(
-            L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+C copy   \x2022   Ctrl+S apply   \x2022   F1/F2/F3 theme",
+            L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+C copy   \x2022   Ctrl+S apply   \x2022   Ctrl+H history   \x2022   F1/F2/F3 theme",
             std::wstring(s.name.begin(), s.name.end()), g_userCount, g_machineCount,
             g_elevated ? L"" : L"  (machine read-only)");
         DrawString(footer, g_fmtSub,
                  D2D1::RectF(pad, sz.height - 28.0f, sz.width - pad, sz.height - 8.0f), s.headerSubtext);
 
         if (g_reviewOpen) PaintReview(s, sz);
+        if (g_historyOpen) PaintHistory(s, sz);
 
         if (g_rt->EndDraw() == D2DERR_RECREATE_TARGET)
         {
@@ -657,6 +1140,16 @@ namespace
                         L"environ \x2014 External change detected", MB_OKCANCEL | MB_ICONWARNING) != IDOK)
             return; // keep the review panel open so the user can re-check or cancel
 
+        // Snapshot the current registry state before overwriting it.
+        {
+            auto snapUser{read_variables(Scope::User)};
+            auto snapMachine{read_variables(Scope::Machine)};
+            auto allChanges{g_reviewUser};
+            allChanges.insert(allChanges.end(), g_reviewMachine.begin(), g_reviewMachine.end());
+            auto label{pnq::unicode::to_utf8(summarize_changes(allChanges))};
+            g_snapshots.create_snapshot(label, snapUser, snapMachine);
+        }
+
         g_reviewOpen = false;
         const ApplyResult result{apply_document_changes(
             g_grid.OriginalVars(Scope::User), g_reviewCurUser,
@@ -679,6 +1172,104 @@ namespace
 
     LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
+        // History modal owns input when open (mutually exclusive with review).
+        if (g_historyOpen)
+        {
+            switch (msg)
+            {
+            case WM_KEYDOWN:
+                if (wp == VK_ESCAPE) { CloseHistory(hwnd); return 0; }
+                if (wp == VK_RETURN && g_historySelected >= 0) { RestoreSnapshot(hwnd); return 0; }
+                if (wp == VK_DELETE) { DeleteSelectedSnapshot(hwnd); return 0; }
+                if (wp == VK_UP || wp == VK_DOWN)
+                {
+                    const int n{static_cast<int>(g_historySnapshots.size())};
+                    if (n > 0)
+                    {
+                        int newSel;
+                        if (wp == VK_UP)
+                            newSel = (g_historySelected <= 0) ? 0 : g_historySelected - 1;
+                        else
+                            newSel = (g_historySelected < 0) ? 0 : std::min(g_historySelected + 1, n - 1);
+                        HistorySelect(newSel);
+                        if (g_rt)
+                        {
+                            const HistoryGeom hg{HistoryLayout(g_rt->GetSize())};
+                            HistoryEnsureVisible(hg, g_historySelected);
+                        }
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                    }
+                    return 0;
+                }
+                return 0;
+            case WM_MOUSEMOVE:
+                if (g_rt)
+                {
+                    const float scale{DipScale(hwnd)};
+                    const float x{GET_X_LPARAM(lp) / scale}, my{GET_Y_LPARAM(lp) / scale};
+                    const HistoryGeom hg{HistoryLayout(g_rt->GetSize())};
+                    bool need{false};
+                    const int btnHover{Contains(hg.closeBtn, x, my) ? 0
+                        : (Contains(hg.restoreBtn, x, my) ? 1
+                        : (Contains(hg.deleteBtn, x, my) ? 2 : -1))};
+                    if (btnHover != g_historyHover) { g_historyHover = btnHover; need = true; }
+                    const int rowHover{HistoryRowAtPoint(hg, x, my)};
+                    if (rowHover != g_historyRowHover) { g_historyRowHover = rowHover; need = true; }
+                    if (need) InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                return 0;
+            case WM_LBUTTONDOWN:
+                if (g_rt)
+                {
+                    const float scale{DipScale(hwnd)};
+                    const float x{GET_X_LPARAM(lp) / scale}, my{GET_Y_LPARAM(lp) / scale};
+                    const HistoryGeom hg{HistoryLayout(g_rt->GetSize())};
+                    if (Contains(hg.closeBtn, x, my))
+                        { g_eatNextDblClk = true; CloseHistory(hwnd); }
+                    else if (Contains(hg.restoreBtn, x, my) && g_historySelected >= 0)
+                        { g_eatNextDblClk = true; RestoreSnapshot(hwnd); }
+                    else if (Contains(hg.deleteBtn, x, my) && g_historySelected >= 0)
+                        { g_eatNextDblClk = true; DeleteSelectedSnapshot(hwnd); }
+                    else if (!Contains(hg.card, x, my))
+                        { g_eatNextDblClk = true; CloseHistory(hwnd); }
+                    else
+                    {
+                        const int row{HistoryRowAtPoint(hg, x, my)};
+                        if (row >= 0 && row != g_historySelected)
+                        {
+                            HistorySelect(row);
+                            InvalidateRect(hwnd, nullptr, FALSE);
+                        }
+                        else if (row >= 0 && row == g_historySelected)
+                        {
+                            // Click on already-selected: deselect
+                            HistorySelect(-1);
+                            InvalidateRect(hwnd, nullptr, FALSE);
+                        }
+                    }
+                }
+                return 0;
+            case WM_MOUSEWHEEL:
+                if (g_rt)
+                {
+                    const HistoryGeom hg{HistoryLayout(g_rt->GetSize())};
+                    const float viewH{hg.list.bottom - hg.list.top};
+                    const float maxScroll{std::max(0.0f, HistoryListContentH(hg) - viewH)};
+                    g_historyScroll -= (static_cast<float>(GET_WHEEL_DELTA_WPARAM(wp)) / WHEEL_DELTA) * 3.0f * hg.rowH;
+                    g_historyScroll = std::clamp(g_historyScroll, 0.0f, maxScroll);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                return 0;
+            case WM_LBUTTONUP:
+            case WM_LBUTTONDBLCLK:
+            case WM_RBUTTONDOWN:
+            case WM_RBUTTONUP:
+            case WM_CONTEXTMENU:
+                return 0;
+            default:
+                break;
+            }
+        }
         // While the apply-review modal is open it owns input; paint/size/etc. fall through.
         if (g_reviewOpen)
         {
@@ -780,6 +1371,7 @@ namespace
         {
             if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(hwnd); return 0; }
             if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) { CopyToClipboard(hwnd, g_grid.CopyText()); return 0; }
+            if (wp == 'H' && (GetKeyState(VK_CONTROL) & 0x8000)) { OpenHistory(hwnd); return 0; }
             if (wp == VK_RETURN) { BeginEditFromGrid(hwnd); return 0; }
             if (wp == VK_INSERT)
             {
@@ -1119,7 +1711,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     g_fmtHeader  = MakeFormat(L"Segoe UI Variable Small", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
     g_fmtGlyph   = MakeFormat(L"Segoe Fluent Icons", 10.0f, DWRITE_FONT_WEIGHT_NORMAL, true, true);
     g_fmtButton  = MakeFormat(L"Segoe UI Variable Text", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true, true);
-    if (!g_fmtCaption || !g_fmtSub || !g_fmtName || !g_fmtValue || !g_fmtHeader || !g_fmtGlyph || !g_fmtButton)
+    g_fmtMono    = MakeFormat(L"Consolas", 9.5f, DWRITE_FONT_WEIGHT_NORMAL, false);
+    if (!g_fmtCaption || !g_fmtSub || !g_fmtName || !g_fmtValue || !g_fmtHeader || !g_fmtGlyph || !g_fmtButton || !g_fmtMono)
     {
         spdlog::error("text format creation failed");
         ReleaseGraphics();
@@ -1127,6 +1720,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     }
 
     LoadData();
+
+    if (!g_snapshots.open())
+        spdlog::warn("Snapshot database unavailable; history disabled");
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
