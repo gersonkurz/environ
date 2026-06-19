@@ -70,6 +70,17 @@ std::wstring validate_variables(std::vector<EnvVariable> const& vars);
 // E.g. "Modify GOPATH" or "Modify PATH, Add NEWVAR (+1 more)"
 std::wstring summarize_changes(std::vector<EnvChange> const& changes);
 
+// Build a monospace text table comparing two sets of environment variables.
+// Only changed variables are shown. For path-list variables with any difference,
+// all segments on both sides are shown so reordering is visible.
+std::vector<std::wstring> build_diff_table(
+    const wchar_t* left_label,
+    const wchar_t* right_label,
+    std::vector<EnvVariable> const& left_user,
+    std::vector<EnvVariable> const& left_machine,
+    std::vector<EnvVariable> const& right_user,
+    std::vector<EnvVariable> const& right_machine);
+
 // Broadcast WM_SETTINGCHANGE so other processes pick up environment changes.
 void broadcast_environment_change();
 

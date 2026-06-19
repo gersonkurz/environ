@@ -106,10 +106,8 @@ void ui::D2DWindow::DiscardDeviceResources()
 void ui::D2DWindow::ReleaseGraphics()
 {
     DiscardDeviceResources();
-    for (IDWriteTextFormat** fmt : {&m_fmtCaption, &m_fmtGlyph})
-    {
-        if (*fmt) { (*fmt)->Release(); *fmt = nullptr; }
-    }
+    m_fmtCaption.reset();
+    m_fmtGlyph.reset();
     if (m_dw)  { m_dw->Release();  m_dw = nullptr; }
     if (m_d2d) { m_d2d->Release(); m_d2d = nullptr; }
 }
@@ -165,7 +163,7 @@ void ui::D2DWindow::DrawString(const std::wstring& s, IDWriteTextFormat* fmt,
 void ui::D2DWindow::DrawCaption(const theme::ColorScheme& s, float widthDip,
                                  const wchar_t* title)
 {
-    DrawString(title, m_fmtCaption,
+    DrawString(title, m_fmtCaption.get(),
              D2D1::RectF(14.0f, 0.0f, widthDip - 3 * kBtnW - 8.0f, kCaptionH), s.headerText);
 
     const CaptionButtons b = CaptionButtonRects(widthDip);
@@ -186,7 +184,7 @@ void ui::D2DWindow::DrawCaption(const theme::ColorScheme& s, float widthDip,
         }
         const D2D1_COLOR_F glyphColor = (hover && isClose) ? s.captionCloseHover.text : s.headerText;
         m_brush->SetColor(glyphColor);
-        m_rt->DrawTextW(&btn.glyph, 1, m_fmtGlyph, btn.rect, m_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        m_rt->DrawTextW(&btn.glyph, 1, m_fmtGlyph.get(), btn.rect, m_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 }
 

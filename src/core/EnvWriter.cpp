@@ -307,6 +307,125 @@ ApplyResult apply_document_changes(
     return result;
 }
 
+std::vector<std::wstring> build_diff_table(
+    const wchar_t* left_label,
+    const wchar_t* right_label,
+    std::vector<EnvVariable> const& left_user,
+    std::vector<EnvVariable> const& left_machine,
+    std::vector<EnvVariable> const& right_user,
+    std::vector<EnvVariable> const& right_machine) {
+
+    struct TableRow { std::wstring name, left, right; };
+    std::vector<TableRow> rows;
+
+    const auto toLower = [](std::wstring s) {
+        std::ranges::transform(s, s.begin(), ::towlower);
+        return s;
+    };
+
+    const auto addScope = [&](const wchar_t* scope,
+                               const std::vector<EnvVariable>& lv,
+                               const std::vector<EnvVariable>& rv) {
+        // Build name->variable maps.
+        std::map<std::wstring, const EnvVariable*> leftMap, rightMap;
+        for (const auto& v : lv) leftMap[toLower(v.name)] = &v;
+        for (const auto& v : rv) rightMap[toLower(v.name)] = &v;
+
+        // Collect all names, sorted case-insensitively.
+        std::set<std::wstring> keys;
+        for (const auto& [k, _] : leftMap) keys.insert(k);
+        for (const auto& [k, _] : rightMap) keys.insert(k);
+
+        for (const auto& key : keys)
+        {
+            auto itL{leftMap.find(key)};
+            auto itR{rightMap.find(key)};
+            const EnvVariable* left{itL != leftMap.end() ? itL->second : nullptr};
+            const EnvVariable* right{itR != rightMap.end() ? itR->second : nullptr};
+
+            // Skip unchanged.
+            if (left && right && left->value == right->value) continue;
+
+            const std::wstring dispName{std::wstring{scope} + L" " +
+                (right ? right->name : left->name)};
+
+            const bool leftPath{left && left->kind == EnvVariableKind::PathList && !left->segments.empty()};
+            const bool rightPath{right && right->kind == EnvVariableKind::PathList && !right->segments.empty()};
+
+            if (leftPath || rightPath)
+            {
+                // Path-list: show all segments side by side.
+                const auto& lSegs{leftPath ? left->segments : std::vector<std::wstring>{}};
+                const auto& rSegs{rightPath ? right->segments : std::vector<std::wstring>{}};
+                const size_t maxSegs{std::max(lSegs.size(), rSegs.size())};
+
+                rows.push_back({dispName,
+                                left ? L"" : L"(not set)",
+                                right ? L"" : L"(not set)"});
+                for (size_t s{0}; s < maxSegs; ++s)
+                {
+                    rows.push_back({L"",
+                                    s < lSegs.size() ? lSegs[s] : L"",
+                                    s < rSegs.size() ? rSegs[s] : L""});
+                }
+            }
+            else
+            {
+                // Scalar: one row.
+                rows.push_back({dispName,
+                                left ? left->value : L"(not set)",
+                                right ? right->value : L"(not set)"});
+            }
+        }
+    };
+
+    addScope(L"[User]", left_user, right_user);
+    addScope(L"[Machine]", left_machine, right_machine);
+
+    if (rows.empty())
+        return {L"  No differences"};
+
+    // Compute column widths from content.
+    size_t nameW{wcslen(L"Variable")};
+    size_t leftW{wcslen(left_label)};
+    size_t rightW{wcslen(right_label)};
+    for (const auto& r : rows)
+    {
+        nameW = std::max(nameW, r.name.size());
+        leftW = std::max(leftW, r.left.size());
+        rightW = std::max(rightW, r.right.size());
+    }
+    // Cap to keep things reasonable; clipping handles overflow.
+    nameW = std::min(nameW, size_t{26});
+    leftW = std::min(leftW, size_t{52});
+    rightW = std::min(rightW, size_t{52});
+
+    const auto pad = [](const std::wstring& s, size_t w) {
+        if (s.size() >= w) return s.substr(0, w);
+        return s + std::wstring(w - s.size(), L' ');
+    };
+
+    std::vector<std::wstring> lines;
+    lines.reserve(rows.size() + 2);
+
+    // Header.
+    lines.push_back(L" " + pad(L"Variable", nameW) + L" \x2502 " +
+                     pad(std::wstring{left_label}, leftW) + L" \x2502 " +
+                     pad(std::wstring{right_label}, rightW));
+    // Separator.
+    lines.push_back(L" " + std::wstring(nameW, L'\x2500') + L"\x2500\x253C\x2500" +
+                     std::wstring(leftW, L'\x2500') + L"\x2500\x253C\x2500" +
+                     std::wstring(rightW, L'\x2500'));
+    // Data rows.
+    for (const auto& r : rows)
+    {
+        lines.push_back(L" " + pad(r.name, nameW) + L" \x2502 " +
+                         pad(r.left, leftW) + L" \x2502 " +
+                         pad(r.right, rightW));
+    }
+    return lines;
+}
+
 void broadcast_environment_change() {
     DWORD_PTR result{0};
     SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0,

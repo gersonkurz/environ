@@ -4,6 +4,38 @@
 
 namespace ui {
 
+// Move-only RAII wrapper for IDWriteTextFormat*.  Releases the COM object on
+// destruction or reassignment.  Non-owning call sites (GridFonts, DrawString
+// params) keep using raw IDWriteTextFormat* via .get().
+class TextFormat
+{
+public:
+    TextFormat() = default;
+    ~TextFormat() { reset(); }
+
+    TextFormat(const TextFormat&) = delete;
+    TextFormat& operator=(const TextFormat&) = delete;
+    TextFormat(TextFormat&& o) noexcept : m_ptr{o.m_ptr} { o.m_ptr = nullptr; }
+    TextFormat& operator=(TextFormat&& o) noexcept
+    {
+        if (this != &o) { reset(); m_ptr = o.m_ptr; o.m_ptr = nullptr; }
+        return *this;
+    }
+
+    // Take ownership from MakeFormat's raw return.
+    TextFormat& operator=(IDWriteTextFormat* p) noexcept
+    {
+        reset(); m_ptr = p; return *this;
+    }
+
+    explicit operator bool() const noexcept { return m_ptr != nullptr; }
+    IDWriteTextFormat* get() const noexcept { return m_ptr; }
+    void reset() noexcept { if (m_ptr) { m_ptr->Release(); m_ptr = nullptr; } }
+
+private:
+    IDWriteTextFormat* m_ptr{nullptr};
+};
+
 class D2DWindow
 {
     PNQ_DECLARE_NON_COPYABLE(D2DWindow)
@@ -65,8 +97,8 @@ protected:
     ID2D1HwndRenderTarget* m_rt{nullptr};
     ID2D1SolidColorBrush*  m_brush{nullptr};
 
-    IDWriteTextFormat* m_fmtCaption{nullptr};
-    IDWriteTextFormat* m_fmtGlyph{nullptr};
+    TextFormat m_fmtCaption;
+    TextFormat m_fmtGlyph;
 
     bool m_tracking{false};
     int  m_capHover{-1};
