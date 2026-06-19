@@ -314,6 +314,7 @@
     <ClInclude Include="src\core\KnowledgeBase.h" />
     <ClInclude Include="src\core\SnapshotStore.h" />
     <ClInclude Include="src\win32\app.h" />
+    <ClInclude Include="src\win32\d2dwindow.h" />
     <ClInclude Include="src\win32\grid.h" />
     <ClInclude Include="src\win32\theme.h" />
     <ClInclude Include="targetver.h" />
@@ -349,6 +350,7 @@
     <ClCompile Include="src\core\KnowledgeBase.cpp" />
     <ClCompile Include="src\core\SnapshotStore.cpp" />
     <ClCompile Include="src\win32\app.cpp" />
+    <ClCompile Include="src\win32\d2dwindow.cpp" />
     <ClCompile Include="src\win32\grid.cpp" />
     <ClCompile Include="src\win32\theme.cpp" />
   </ItemGroup>

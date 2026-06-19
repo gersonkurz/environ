@@ -1,6 +1,6 @@
 #pragma once
 
-#include "theme.h"
+#include "d2dwindow.h"
 #include "grid.h"
 #include "AppSettings.h"
 #include "EnvStore.h"
@@ -9,7 +9,7 @@
 
 namespace ui {
 
-class MainWindow final
+class MainWindow final : public D2DWindow
 {
     PNQ_DECLARE_NON_COPYABLE(MainWindow)
 
@@ -28,35 +28,25 @@ private:
         float detailH{16.0f};
     };
 
-    // WndProc
-    static LRESULT CALLBACK StaticWndProc(HWND, UINT, WPARAM, LPARAM);
-    LRESULT HandleMessage(UINT msg, WPARAM wp, LPARAM lp);
+    // D2DWindow overrides
+    LRESULT HandleMessage(UINT msg, WPARAM wp, LPARAM lp) override;
+    void    OnPaint(const D2D1_SIZE_F& sz) override;
+    void    OnSize() override;
+    void    OnDpiChanged() override;
+    void    OnDestroy() override;
 
     // Init
-    bool    InitGraphics();
     bool    InitSettings();
     bool    InitFonts();
     void    InitData();
 
-    // Graphics
-    void    DiscardDeviceResources();
-    void    ReleaseGraphics();
-    HRESULT EnsureRenderTarget();
-
     // Painting
-    void DrawString(const std::wstring& s, IDWriteTextFormat* fmt,
-                    const D2D1_RECT_F& box, const D2D1_COLOR_F& c);
-    void DrawCaption(const theme::ColorScheme& s, float widthDip);
     void DrawReviewButton(const D2D1_RECT_F& r, const wchar_t* label,
                           bool primary, bool hover, const theme::ColorScheme& s);
     void PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
     void PaintHistory(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
-    void Paint();
 
     // Fonts
-    IDWriteTextFormat* MakeFormat(const wchar_t* family, float size,
-                                  DWRITE_FONT_WEIGHT weight, bool vcenter,
-                                  bool hcenter = false);
     bool CreateFonts();
     void RefreshEditBrush();
     void RefreshEditFont();
@@ -99,23 +89,12 @@ private:
     void  HistoryEnsureVisible(const HistoryGeom& hg, int idx);
 
     // === Members ===
-    HINSTANCE m_hInst{nullptr};
-    int       m_nCmdShow{SW_SHOWDEFAULT};
-    HWND      m_hwnd{nullptr};
 
-    // D2D / DWrite
-    ID2D1Factory*          m_d2d{nullptr};
-    IDWriteFactory*        m_dw{nullptr};
-    ID2D1HwndRenderTarget* m_rt{nullptr};
-    ID2D1SolidColorBrush*  m_brush{nullptr};
-
-    // Text formats
-    IDWriteTextFormat* m_fmtCaption{nullptr};
+    // Text formats (subclass-owned; base owns m_fmtCaption + m_fmtGlyph)
     IDWriteTextFormat* m_fmtSub{nullptr};
     IDWriteTextFormat* m_fmtName{nullptr};
     IDWriteTextFormat* m_fmtValue{nullptr};
     IDWriteTextFormat* m_fmtHeader{nullptr};
-    IDWriteTextFormat* m_fmtGlyph{nullptr};
     IDWriteTextFormat* m_fmtButton{nullptr};
     IDWriteTextFormat* m_fmtMono{nullptr};
 
@@ -128,10 +107,6 @@ private:
     size_t m_userCount{0};
     size_t m_machineCount{0};
     bool   m_elevated{false};
-
-    // Caption / mouse tracking
-    bool m_tracking{false};
-    int  m_capHover{-1};
 
     // Inline editor
     HWND   m_edit{nullptr};
