@@ -44,6 +44,7 @@ struct AppSettings : public Section {
 
         // "System", "Light", or "Dark"
         TypedValue<std::string> theme{this, "Theme", "System"};
+        TypedValue<int32_t> zoom{this, "Zoom", 100}; // percentage: 50–200
 
     } appearance{this};
 

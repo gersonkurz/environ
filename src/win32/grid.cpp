@@ -1,9 +1,5 @@
+#include "precomp.h"
 #include "grid.h"
-
-#include <algorithm>
-#include <cwctype>
-#include <string>
-#include <unordered_map>
 
 namespace ui
 {
@@ -408,6 +404,13 @@ namespace ui
             result.push_back(std::move(nv));
 
         return result;
+    }
+
+    void Grid::SetZoom(float zoom)
+    {
+        m_rowH = 30.0f * zoom;
+        m_headerH = 32.0f * zoom;
+        ClampScroll();
     }
 
     Grid::Layout Grid::Compute() const

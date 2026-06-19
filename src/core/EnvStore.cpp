@@ -1,14 +1,6 @@
+#include "precomp.h"
 #include "EnvStore.h"
 
-#include <pnq/regis3.h>
-#include <pnq/unicode.h>
-#include <spdlog/spdlog.h>
-
-#include <algorithm>
-#include <cwctype>
-#include <filesystem>
-
-#include <windows.h>
 
 namespace Environ::core {
 

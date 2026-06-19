@@ -1,12 +1,5 @@
+#include "precomp.h"
 #include "theme.h"
-
-#include <windows.h>
-
-// toml++ in no-throw mode: parse failures come back as a checkable result, not an
-// exception. Keeps this host free of throw/catch in our own code.
-#define TOML_EXCEPTIONS 0
-#define TOML_ENABLE_FORMATTERS 0
-#include <toml++/toml.hpp>
 
 namespace theme
 {
@@ -191,16 +184,19 @@ namespace theme
         const std::string content = ReadAll(tomlPath);
         if (!content.empty())
         {
-            auto result = toml::parse(content, std::string_view{"theme.toml"});
-            if (result)
+            try
             {
-                const toml::table& root = result.table();
+                auto root = toml::parse(content, std::string_view{ "theme.toml" });
                 if (const toml::table* t = root["dark"].as_table())  dark = ReadScheme("dark", *t, dark);
                 if (const toml::table* t = root["light"].as_table()) light = ReadScheme("light", *t, light);
                 if (const toml::table* t = root["blue"].as_table())  blue = ReadScheme("blue", *t, blue);
             }
+            catch (...)
+            {
+                spdlog::error("Failed to load theme from '{}', using defaults",
+                    pnq::unicode::to_utf8(tomlPath));
+            }
         }
-
         m_schemes = {dark, light, blue};
         m_current = 0;
     }

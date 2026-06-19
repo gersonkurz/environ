@@ -44,7 +44,7 @@ Copy-Item (Join-Path $srcDir 'theme.toml') $out -Force
 # files actually used are compiled — read-only Phase 1 needs just EnvStore.
 $hostSources = @(Get-ChildItem $srcDir -Filter *.cpp | ForEach-Object { $_.FullName })
 if (-not $hostSources) { throw "no sources in $srcDir" }
-$coreSources = @('EnvStore.cpp', 'EnvWriter.cpp', 'SnapshotStore.cpp') | ForEach-Object { Join-Path $root "src\core\$_" }
+$coreSources = @('EnvStore.cpp', 'EnvWriter.cpp', 'SnapshotStore.cpp', 'AppSettings.cpp') | ForEach-Object { Join-Path $root "src\core\$_" }
 $sources = $hostSources + $coreSources
 
 # Our code (src/core, src/win32) is policed at /W4 /WX. Third-party headers are external:

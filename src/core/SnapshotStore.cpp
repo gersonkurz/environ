@@ -1,17 +1,6 @@
+
+#include "precomp.h"
 #include "SnapshotStore.h"
-
-#include <sqlite3.h>
-#include <pnq/sqlite/sqlite.h>
-#include <pnq/unicode.h>
-#include <spdlog/spdlog.h>
-
-#include <algorithm>
-#include <chrono>
-#include <filesystem>
-#include <format>
-
-#include <windows.h>
-#include <shlobj.h>
 
 namespace Environ::core {
 

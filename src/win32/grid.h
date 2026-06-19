@@ -105,6 +105,9 @@ namespace ui
         bool IsEditing() const { return m_editing >= 0; }
         bool IsEditingName() const { return m_editing >= 0 && m_editingName; }
 
+        // Adjust row/header heights by zoom factor (1.0 = 100%).
+        void SetZoom(float zoom);
+
         // Restore from snapshot: loads snapshot variables into the grid with current
         // registry state as originals, so differences show as dirty edits.
         void SetDataForRestore(

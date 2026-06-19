@@ -1,18 +1,9 @@
 # Build output
 build/
-build-win32/
-build-x64/
-build-arm64/
-packages/
-Generated Files/
-
-# Win32-host MSBuild intermediates (retired WinUI baseline)
-scratch/**/x64/
-scratch/**/EnvironN.*/
-scratch/_priindex/
+temp/
+bin/
 
 # Logs and local artifacts
-myeasylog.log
 *.log
 
 # Installer artifacts

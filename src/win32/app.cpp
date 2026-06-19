@@ -1,29 +1,14 @@
+#include "precomp.h"
+
 // environ — Win32 host entry point (Phase 2: read + inline editing, no registry write yet).
 // Pure Win32 + Direct2D + DirectWrite. Frameless window with a custom-drawn title bar.
 // Owns the window, D2D device resources, theme, grid, and the inline EDIT editor; loads
 // live data from core EnvStore and forwards input.
 
-#include <windows.h>
-#include <windowsx.h>
-#include <commctrl.h>
-#include <d2d1.h>
-#include <d2d1helper.h>
-#include <dwrite.h>
-#include <dwmapi.h>
-#include <algorithm>
-#include <cwctype>
-#include <format>
-#include <map>
-#include <set>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
-#include <pnq/unicode.h>
-#include <spdlog/spdlog.h>
 
 #include "theme.h"
 #include "grid.h"
+#include "AppSettings.h"
 #include "EnvStore.h"
 #include "EnvWriter.h"
 #include "SnapshotStore.h"
@@ -72,6 +57,8 @@ namespace
     theme::ThemeSet g_theme;
     ui::Grid g_grid;
     Environ::core::SnapshotStore g_snapshots;
+    Environ::core::AppSettings g_settings;
+    float g_zoom{1.0f}; // 1.0 = 100%, range [0.5, 2.0]
     size_t g_userCount{0};
     size_t g_machineCount{0};
     bool g_elevated{false};
@@ -157,10 +144,10 @@ namespace
         if (g_editFontName) DeleteObject(g_editFontName);
         // Value font matches the value column (12, normal); name font matches the name
         // column (14, semibold). PositionEditor selects one per edit.
-        g_editFont = CreateFontW(-px(12.0f), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        g_editFont = CreateFontW(-px(12.0f * g_zoom), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
-        g_editFontName = CreateFontW(-px(14.0f), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        g_editFontName = CreateFontW(-px(14.0f * g_zoom), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                      CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
     }
@@ -829,10 +816,12 @@ namespace
             }
         }
 
-        const std::wstring footer = std::format(
+        std::wstring footer = std::format(
             L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+C copy   \x2022   Ctrl+S apply   \x2022   Ctrl+H history   \x2022   F1/F2/F3 theme",
             std::wstring(s.name.begin(), s.name.end()), g_userCount, g_machineCount,
             g_elevated ? L"" : L"  (machine read-only)");
+        if (g_zoom != 1.0f)
+            footer += std::format(L"   \x2022   {}%", static_cast<int>(g_zoom * 100));
         DrawString(footer, g_fmtSub,
                  D2D1::RectF(pad, sz.height - 28.0f, sz.width - pad, sz.height - 8.0f), s.headerSubtext);
 
@@ -869,6 +858,28 @@ namespace
                                            : DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         if (hcenter) fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         return fmt;
+    }
+
+    // (Re-)create all DWrite text formats with current g_zoom applied.
+    // Returns false if any format creation fails.
+    bool CreateFonts()
+    {
+        for (IDWriteTextFormat** fmt : {&g_fmtCaption, &g_fmtSub, &g_fmtName,
+             &g_fmtValue, &g_fmtHeader, &g_fmtGlyph, &g_fmtButton, &g_fmtMono})
+        {
+            if (*fmt) { (*fmt)->Release(); *fmt = nullptr; }
+        }
+        const auto z = [](float size) { return size * g_zoom; };
+        g_fmtCaption = MakeFormat(L"Segoe UI Variable Text", z(13.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
+        g_fmtSub     = MakeFormat(L"Segoe UI Variable Text", z(12.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
+        g_fmtName    = MakeFormat(L"Segoe UI Variable Text", z(14.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
+        g_fmtValue   = MakeFormat(L"Segoe UI Variable Small", z(11.5f), DWRITE_FONT_WEIGHT_NORMAL, true);
+        g_fmtHeader  = MakeFormat(L"Segoe UI Variable Small", z(11.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
+        g_fmtGlyph   = MakeFormat(L"Segoe Fluent Icons", z(10.0f), DWRITE_FONT_WEIGHT_NORMAL, true, true);
+        g_fmtButton  = MakeFormat(L"Segoe UI Variable Text", z(13.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true, true);
+        g_fmtMono    = MakeFormat(L"Consolas", z(9.5f), DWRITE_FONT_WEIGHT_NORMAL, false);
+        return g_fmtCaption && g_fmtSub && g_fmtName && g_fmtValue
+            && g_fmtHeader && g_fmtGlyph && g_fmtButton && g_fmtMono;
     }
 
     // Subclass for the inline EDIT: intercept Enter/Esc/Tab (which a bare EDIT ignores or
@@ -1372,6 +1383,18 @@ namespace
             if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(hwnd); return 0; }
             if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) { CopyToClipboard(hwnd, g_grid.CopyText()); return 0; }
             if (wp == 'H' && (GetKeyState(VK_CONTROL) & 0x8000)) { OpenHistory(hwnd); return 0; }
+            if (wp == '0' && (GetKeyState(VK_CONTROL) & 0x8000))
+            {
+                if (g_grid.IsEditing()) EndEdit(hwnd, true);
+                g_zoom = 1.0f;
+                CreateFonts();
+                g_grid.SetZoom(g_zoom);
+                RefreshEditFont(hwnd);
+                g_settings.appearance.zoom.set(static_cast<int32_t>(g_zoom * 100.0f));
+                g_settings.save();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
             if (wp == VK_RETURN) { BeginEditFromGrid(hwnd); return 0; }
             if (wp == VK_INSERT)
             {
@@ -1404,6 +1427,8 @@ namespace
                 {
                     ApplyTitleBar(hwnd);
                     if (g_editBrush) RefreshEditBrush(); // re-tint the cached editor brush
+                    g_settings.appearance.theme.set(g_theme.Current().name);
+                    g_settings.save();
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
             }
@@ -1504,6 +1529,19 @@ namespace
             return 0;
         }
         case WM_MOUSEWHEEL:
+            if (GetKeyState(VK_CONTROL) & 0x8000)
+            {
+                if (g_grid.IsEditing()) EndEdit(hwnd, true);
+                const float delta{(GET_WHEEL_DELTA_WPARAM(wp) > 0) ? 0.1f : -0.1f};
+                g_zoom = std::clamp(g_zoom + delta, 0.5f, 2.0f);
+                CreateFonts();
+                g_grid.SetZoom(g_zoom);
+                RefreshEditFont(hwnd);
+                g_settings.appearance.zoom.set(static_cast<int32_t>(g_zoom * 100.0f));
+                g_settings.save();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
             if (g_grid.IsEditing()) EndEdit(hwnd, true);
             Repaint(hwnd, g_grid.OnWheel(GET_WHEEL_DELTA_WPARAM(wp)));
             return 0;
@@ -1649,12 +1687,23 @@ namespace
             return 0;
         }
         case WM_DESTROY:
+        {
+            WINDOWPLACEMENT wpl{};
+            wpl.length = sizeof(wpl);
+            GetWindowPlacement(g_hwnd, &wpl);
+            g_settings.window.x.set(static_cast<int32_t>(wpl.rcNormalPosition.left));
+            g_settings.window.y.set(static_cast<int32_t>(wpl.rcNormalPosition.top));
+            g_settings.window.width.set(static_cast<int32_t>(wpl.rcNormalPosition.right - wpl.rcNormalPosition.left));
+            g_settings.window.height.set(static_cast<int32_t>(wpl.rcNormalPosition.bottom - wpl.rcNormalPosition.top));
+            g_settings.window.maximized.set(wpl.showCmd == SW_MAXIMIZE);
+            g_settings.save();
             if (g_editBrush) { DeleteObject(g_editBrush); g_editBrush = nullptr; }
             if (g_editFont)     { DeleteObject(g_editFont);     g_editFont = nullptr; }
             if (g_editFontName) { DeleteObject(g_editFontName); g_editFontName = nullptr; }
             ReleaseGraphics();
             PostQuitMessage(0);
             return 0;
+        }
         }
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
@@ -1686,6 +1735,28 @@ namespace
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
 {
+    // Set up spdlog with a file sink so logging is visible in a /SUBSYSTEM:WINDOWS app.
+    {
+        wchar_t* appdata{nullptr};
+        if (SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &appdata) == S_OK)
+        {
+            std::filesystem::path logPath{appdata};
+            CoTaskMemFree(appdata);
+            logPath /= L"environ";
+            std::filesystem::create_directories(logPath);
+            logPath /= L"environ.log";
+            auto fileSink{std::make_shared<spdlog::sinks::basic_file_sink_mt>(logPath.string(), true)};
+            auto logger{std::make_shared<spdlog::logger>("environ", fileSink)};
+            logger->set_level(spdlog::level::info);
+            logger->flush_on(spdlog::level::info);
+            spdlog::set_default_logger(logger);
+        }
+        else
+        {
+            CoTaskMemFree(appdata);
+        }
+    }
+
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_d2d)))
@@ -1702,17 +1773,35 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
         return 1;
     }
 
-    g_theme.LoadOrDefault(ThemePathBesideExe());
+    try
+    {
+        g_settings.load();
+    }
+    catch (const std::exception& e)
+    {
+        spdlog::error("Settings load failed: {}", e.what());
+        ReleaseGraphics();
+        return 1;
+    }
+    g_zoom = std::clamp(static_cast<float>(g_settings.appearance.zoom.get()) / 100.0f, 0.5f, 2.0f);
+    spdlog::info("Settings: window=({},{} {}x{}), maximized={}, theme='{}', zoom={}%",
+                 g_settings.window.x.get(), g_settings.window.y.get(),
+                 g_settings.window.width.get(), g_settings.window.height.get(),
+                 g_settings.window.maximized.get(),
+                 g_settings.appearance.theme.get(),
+                 g_settings.appearance.zoom.get());
 
-    g_fmtCaption = MakeFormat(L"Segoe UI Variable Text", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
-    g_fmtSub     = MakeFormat(L"Segoe UI Variable Text", 12.0f, DWRITE_FONT_WEIGHT_NORMAL, false);
-    g_fmtName    = MakeFormat(L"Segoe UI Variable Text", 14.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
-    g_fmtValue   = MakeFormat(L"Segoe UI Variable Small", 11.5f, DWRITE_FONT_WEIGHT_NORMAL, true);
-    g_fmtHeader  = MakeFormat(L"Segoe UI Variable Small", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
-    g_fmtGlyph   = MakeFormat(L"Segoe Fluent Icons", 10.0f, DWRITE_FONT_WEIGHT_NORMAL, true, true);
-    g_fmtButton  = MakeFormat(L"Segoe UI Variable Text", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, true, true);
-    g_fmtMono    = MakeFormat(L"Consolas", 9.5f, DWRITE_FONT_WEIGHT_NORMAL, false);
-    if (!g_fmtCaption || !g_fmtSub || !g_fmtName || !g_fmtValue || !g_fmtHeader || !g_fmtGlyph || !g_fmtButton || !g_fmtMono)
+    g_theme.LoadOrDefault(ThemePathBesideExe());
+    {
+        const auto& savedTheme{g_settings.appearance.theme.get()};
+        if (!savedTheme.empty())
+        {
+            const bool found{g_theme.SelectByName(savedTheme)};
+            spdlog::info("Theme restore: '{}' -> {}", savedTheme, found ? "found" : "NOT FOUND");
+        }
+    }
+
+    if (!CreateFonts())
     {
         spdlog::error("text format creation failed");
         ReleaseGraphics();
@@ -1720,6 +1809,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     }
 
     LoadData();
+    g_grid.SetZoom(g_zoom);
 
     if (!g_snapshots.open())
         spdlog::warn("Snapshot database unavailable; history disabled");
@@ -1733,9 +1823,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     wc.lpszClassName = L"EnvironWin32Host";
     RegisterClassExW(&wc);
 
+    int wx{g_settings.window.x.get()};
+    int wy{g_settings.window.y.get()};
+    int ww{g_settings.window.width.get()};
+    int wh{g_settings.window.height.get()};
+    if (wx < 0 || wy < 0) { wx = CW_USEDEFAULT; wy = CW_USEDEFAULT; }
+    if (ww <= 0) ww = 860;
+    if (wh <= 0) wh = 620;
+
     g_hwnd = CreateWindowExW(
         0, wc.lpszClassName, L"environ", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        CW_USEDEFAULT, CW_USEDEFAULT, 860, 620, nullptr, nullptr, hInst, nullptr);
+        wx, wy, ww, wh, nullptr, nullptr, hInst, nullptr);
     if (!g_hwnd)
     {
         spdlog::error("CreateWindowExW failed");
@@ -1747,10 +1845,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
     const int backdrop{DWMSBT_MAINWINDOW};
     DwmSetWindowAttribute(g_hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
 
+    // Validate the restored position against available monitors — if the window
+    // is entirely off-screen (monitor removed/reconfigured), reset to default.
+    if (!MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONULL))
+    {
+        SetWindowPos(g_hwnd, nullptr, CW_USEDEFAULT, CW_USEDEFAULT, ww, wh,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
     // Re-run NCCALCSIZE so the frameless client takes effect.
     SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0,
                  SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-    ShowWindow(g_hwnd, nCmdShow);
+    ShowWindow(g_hwnd, g_settings.window.maximized.get() ? SW_MAXIMIZE : nCmdShow);
 
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0))

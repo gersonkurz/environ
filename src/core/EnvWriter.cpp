@@ -1,13 +1,6 @@
+
+#include "precomp.h"
 #include "EnvWriter.h"
-
-#include <pnq/unicode.h>
-#include <spdlog/spdlog.h>
-
-#include <cwctype>
-#include <format>
-#include <unordered_set>
-
-#include <windows.h>
 
 namespace Environ::core {
 

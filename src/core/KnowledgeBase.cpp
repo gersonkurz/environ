@@ -1,10 +1,5 @@
+#include "precomp.h"
 #include "KnowledgeBase.h"
-
-#include <pnq/unicode.h>
-#include <spdlog/spdlog.h>
-#include <toml++/toml.hpp>
-
-#include <algorithm>
 
 namespace Environ::core {
 
