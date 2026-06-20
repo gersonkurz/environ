@@ -101,25 +101,25 @@
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)bin\$(PlatformName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)temp\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(SolutionDir)Extern\fkYAML\include;$(IncludePath)</IncludePath>
     <GenerateManifest>true</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)bin\$(PlatformName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)temp\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(SolutionDir)Extern\fkYAML\include;$(IncludePath)</IncludePath>
     <GenerateManifest>true</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)bin\$(PlatformName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)temp\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(SolutionDir)Extern\fkYAML\include;$(IncludePath)</IncludePath>
     <GenerateManifest>true</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
-    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(SolutionDir)Extern\fkYAML\include;$(IncludePath)</IncludePath>
     <OutDir>$(SolutionDir)bin\$(PlatformName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)temp\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
     <GenerateManifest>true</GenerateManifest>
@@ -129,11 +129,11 @@
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)bin\$(PlatformName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)temp\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(SolutionDir)Extern\fkYAML\include;$(IncludePath)</IncludePath>
     <GenerateManifest>true</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
-    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(SolutionDir)src\core;$(SolutionDir)src\win32;$(SolutionDir)Extern\spdlog\include;$(SolutionDir)Extern\pnq\include;$(SolutionDir)Extern\sqlite3-amalgamation\src\sqlite3;$(SolutionDir)Extern\tomlplusplus\include;$(SolutionDir)Extern\fkYAML\include;$(IncludePath)</IncludePath>
     <OutDir>$(SolutionDir)bin\$(PlatformName)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)temp\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
     <GenerateManifest>true</GenerateManifest>
@@ -361,12 +361,14 @@
     <ClCompile Include="src\win32\historyview.cpp" />
     <ClCompile Include="src\win32\theme.cpp" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="src\win32\theme.toml">
-      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</DeploymentContent>
-    </None>
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <Target Name="CopyThemes" AfterTargets="Build">
+    <ItemGroup>
+      <ThemeFiles Include="$(SolutionDir)themes\*.yaml" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutDir)themes" />
+    <Copy SourceFiles="@(ThemeFiles)" DestinationFolder="$(OutDir)themes" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

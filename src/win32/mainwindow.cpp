@@ -33,14 +33,14 @@ namespace
         return RGB(static_cast<BYTE>(c.r * 255.0f), static_cast<BYTE>(c.g * 255.0f), static_cast<BYTE>(c.b * 255.0f));
     }
 
-    std::wstring ThemePathBesideExe()
+    std::wstring ThemesDirBesideExe()
     {
         wchar_t path[MAX_PATH]{};
-        const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+        const DWORD n{GetModuleFileNameW(nullptr, path, MAX_PATH)};
         std::wstring dir{path, n};
-        const size_t slash = dir.find_last_of(L"\\/");
+        const size_t slash{dir.find_last_of(L"\\/")};
         if (slash != std::wstring::npos) dir.resize(slash);
-        return dir + L"\\theme.toml";
+        return dir + L"\\themes";
     }
 
     // Nav panel constants.
@@ -82,7 +82,7 @@ bool ui::MainWindow::InitSettings()
     }
     m_zoom = std::clamp(static_cast<float>(m_settings.appearance.zoom.get()) / 100.0f, 0.5f, 2.0f);
 
-    m_theme.LoadOrDefault(ThemePathBesideExe());
+    m_theme.LoadFromDirectory(ThemesDirBesideExe());
     {
         const auto& savedTheme{m_settings.appearance.theme.get()};
         if (!savedTheme.empty()) m_theme.SelectByName(savedTheme);
@@ -572,26 +572,14 @@ void ui::MainWindow::PaintMsgBox(const theme::ColorScheme& s, const D2D1_SIZE_F&
 int ui::MainWindow::NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const
 {
     if (!m_navOpen) return -1;
-    // Panel rect: (0, 48, kNavWidth, sz.height - 32)
     if (x < 0.0f || x >= kNavWidth || y < 48.0f || y >= sz.height - 32.0f)
         return -1;
 
     // Items start at panel top (48) + 8 padding.
-    // Section header "THEME" (not clickable): 36 DIP
-    // Items 0,1,2 (Dark/Light/Blue): 36 DIP each
-    // Gap: 12 DIP
-    // Items 3,4 (History/Save): 36 DIP each
+    // Items 0,1 (History/Save): 36 DIP each
     const float startY{48.0f + 8.0f};
-    const float afterHeader{startY + kNavItemH}; // after "THEME" header
-    if (y >= afterHeader && y < afterHeader + 3 * kNavItemH)
-    {
-        return static_cast<int>((y - afterHeader) / kNavItemH); // 0,1,2
-    }
-    const float afterGap{afterHeader + 3 * kNavItemH + 12.0f};
-    if (y >= afterGap && y < afterGap + 2 * kNavItemH)
-    {
-        return 3 + static_cast<int>((y - afterGap) / kNavItemH); // 3,4
-    }
+    if (y >= startY && y < startY + 2 * kNavItemH)
+        return static_cast<int>((y - startY) / kNavItemH); // 0,1
     return -1;
 }
 
@@ -600,20 +588,7 @@ void ui::MainWindow::HandleNavClick(int item)
     const auto ctx{MakeContext()};
     switch (item)
     {
-    case 0: case 1: case 2:
-    {
-        const char* names[]{"dark", "light", "blue"};
-        if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
-        if (m_theme.SelectByName(names[item]))
-        {
-            ApplyTitleBar();
-            m_gridView.RefreshEditBrush();
-            m_settings.appearance.theme.set(m_theme.Current().name);
-            m_settings.save();
-        }
-        break;
-    }
-    case 3: // History
+    case 0: // History
         if (m_activeView == &m_historyView)
             SwitchToView(&m_gridView);
         else
@@ -622,7 +597,7 @@ void ui::MainWindow::HandleNavClick(int item)
             SwitchToView(&m_historyView);
         }
         break;
-    case 4: // Save
+    case 1: // Save
         SaveChanges();
         break;
     }
@@ -644,52 +619,14 @@ void ui::MainWindow::PaintNav(const theme::ColorScheme& s, const D2D1_SIZE_F& sz
     const float padLeft{16.0f};
     const float padRight{kNavWidth - 12.0f};
 
-    // Section header: "THEME"
-    DrawString(L"THEME", m_fmtHeader.get(),
-               D2D1::RectF(padLeft, startY, padRight, startY + kNavItemH), s.headerSubtext);
-
-    // Theme items
-    const wchar_t* themeLabels[]{L"Dark", L"Light", L"Blue"};
-    const wchar_t* themeHints[]{L"F1", L"F2", L"F3"};
-    const auto& curName{m_theme.Current().name};
-    const std::string itemNames[]{"dark", "light", "blue"};
-
-    for (int i{0}; i < 3; ++i)
-    {
-        const float iy{startY + kNavItemH + i * kNavItemH};
-        const D2D1_RECT_F itemRect{D2D1::RectF(0.0f, iy, kNavWidth, iy + kNavItemH)};
-        const bool hovered{m_navHover == i};
-        const bool active{curName == itemNames[i]};
-
-        if (hovered)
-        {
-            m_brush->SetColor(s.rowHover.fill);
-            m_rt->FillRectangle(itemRect, m_brush);
-        }
-
-        // Label
-        const D2D1_COLOR_F labelColor{hovered ? s.rowHover.text : (active ? s.accent : s.headerText)};
-        std::wstring label{themeLabels[i]};
-        if (active) label = L"\x2022  " + label; // bullet for active theme
-        DrawString(label, m_fmtValue.get(),
-                   D2D1::RectF(padLeft, iy, padRight - 40.0f, iy + kNavItemH), labelColor);
-
-        // Right-aligned hint
-        DrawString(themeHints[i], m_fmtValue.get(),
-                   D2D1::RectF(padRight - 40.0f, iy, padRight, iy + kNavItemH), s.headerSubtext);
-    }
-
-    // Gap (12 DIP), then History + Save
-    const float groupY{startY + kNavItemH + 3 * kNavItemH + 12.0f};
-    const wchar_t* actionLabels[]{L"History", L"Save"};
-    const wchar_t* actionHints[]{L"Ctrl+H", L"Ctrl+S"};
+    const wchar_t* labels[]{L"History", L"Save"};
+    const wchar_t* hints[]{L"Ctrl+H", L"Ctrl+S"};
 
     for (int i{0}; i < 2; ++i)
     {
-        const int idx{3 + i};
-        const float iy{groupY + i * kNavItemH};
+        const float iy{startY + i * kNavItemH};
         const D2D1_RECT_F itemRect{D2D1::RectF(0.0f, iy, kNavWidth, iy + kNavItemH)};
-        const bool hovered{m_navHover == idx};
+        const bool hovered{m_navHover == i};
 
         if (hovered)
         {
@@ -698,10 +635,10 @@ void ui::MainWindow::PaintNav(const theme::ColorScheme& s, const D2D1_SIZE_F& sz
         }
 
         const D2D1_COLOR_F labelColor{hovered ? s.rowHover.text : s.headerText};
-        DrawString(actionLabels[i], m_fmtValue.get(),
+        DrawString(labels[i], m_fmtValue.get(),
                    D2D1::RectF(padLeft, iy, padRight - 60.0f, iy + kNavItemH), labelColor);
 
-        DrawString(actionHints[i], m_fmtValue.get(),
+        DrawString(hints[i], m_fmtValue.get(),
                    D2D1::RectF(padRight - 60.0f, iy, padRight, iy + kNavItemH), s.headerSubtext);
     }
 }
@@ -944,24 +881,6 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             m_settings.appearance.zoom.set(static_cast<int32_t>(m_zoom * 100.0f));
             m_settings.save();
             InvalidateRect(m_hwnd, nullptr, FALSE);
-            return 0;
-        }
-        // Theme switching.
-        const char* want{nullptr};
-        if (wp == VK_F1) want = "dark";
-        else if (wp == VK_F2) want = "light";
-        else if (wp == VK_F3) want = "blue";
-        if (want)
-        {
-            if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
-            if (m_theme.SelectByName(want))
-            {
-                ApplyTitleBar();
-                m_gridView.RefreshEditBrush();
-                m_settings.appearance.theme.set(m_theme.Current().name);
-                m_settings.save();
-                InvalidateRect(m_hwnd, nullptr, FALSE);
-            }
             return 0;
         }
         // Delegate to active view.

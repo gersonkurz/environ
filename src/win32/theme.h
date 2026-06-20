@@ -1,8 +1,7 @@
 // Theme layer for the Win32 host.
-// Inspired by ProAKT's ColorScheme/DataSet model: one central table of named,
-// per-state styles that every painter reads from — translated to D2D-native types.
-// Schemes are pure data (no device resources), so loading/swapping is trivial and
-// device-loss only ever touches the single render-target brush in app.cpp.
+// Loads Base16 YAML schemes from a themes/ directory beside the exe and maps
+// the 16-color palette deterministically to a ColorScheme used by all painters.
+// Schemes are pure data (no device resources), so loading/swapping is trivial.
 #pragma once
 
 #include <d2d1.h>
@@ -53,15 +52,16 @@ namespace theme
         Style edit;              // inline cell editor: fill + focus border + text
     };
 
-    // Owns the available schemes. Always yields at least the built-in dark/light/blue
-    // (so the app renders even with no theme.toml); a theme.toml overrides them.
+    // Owns the available schemes loaded from Base16 YAML files in a themes/ directory.
+    // Falls back to a hardcoded dark scheme if the directory is empty or missing.
     class ThemeSet
     {
     public:
-        void LoadOrDefault(const std::wstring& tomlPath);
+        void LoadFromDirectory(const std::wstring& themesDir);
         bool SelectByName(const std::string& name);
         const ColorScheme& Current() const { return m_schemes[m_current]; }
         size_t Count() const { return m_schemes.size(); }
+        std::vector<std::string> Names() const;
 
     private:
         std::vector<ColorScheme> m_schemes;
