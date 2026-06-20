@@ -9,6 +9,8 @@
 #include "EnvWriter.h"
 #include "SnapshotStore.h"
 
+#include <functional>
+
 namespace ui {
 
 class MainWindow final : public D2DWindow
@@ -23,6 +25,17 @@ public:
 private:
     // Nested layout types (used in method signatures)
     struct ReviewGeom { D2D1_RECT_F card, list, cancelBtn, applyBtn; };
+    struct MsgBoxGeom { D2D1_RECT_F card, bodyRect, okBtn, cancelBtn; };
+
+    struct MsgBoxState
+    {
+        bool         open{false};
+        std::wstring title;
+        std::wstring body;
+        bool         hasCancel{false};
+        int          hover{-1};
+        std::function<void()> onOk;
+    };
 
     // D2DWindow overrides
     LRESULT HandleMessage(UINT msg, WPARAM wp, LPARAM lp) override;
@@ -53,6 +66,15 @@ private:
     void SaveChanges();
     void CancelReview();
     void ApplyReviewed();
+    void DoApply();
+
+    // Message box overlay
+    void ShowMsgBox(std::wstring title, std::wstring body);
+    void ShowMsgBox(std::wstring title, std::wstring body, std::function<void()> onOk);
+    void DismissMsgBox();
+    void AcceptMsgBox();
+    MsgBoxGeom MsgBoxLayout(const D2D1_SIZE_F& sz);
+    void PaintMsgBox(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
 
     // Nav panel
     int  NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const;
@@ -94,6 +116,9 @@ private:
     bool m_navOpen{false};
     int  m_navHover{-1};
     bool m_navBurgerHover{false};
+
+    // Message box modal
+    MsgBoxState m_msgBox;
 
     // Review modal
     bool m_reviewOpen{false};

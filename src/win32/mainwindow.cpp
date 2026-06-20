@@ -249,7 +249,7 @@ void ui::MainWindow::SaveChanges()
     }
     if (!m_gridView.HasChanges())
     {
-        MessageBoxW(m_hwnd, L"No changes to apply.", L"environ", MB_OK | MB_ICONINFORMATION);
+        ShowMsgBox(L"environ", L"No changes to apply.");
         return;
     }
 
@@ -263,7 +263,7 @@ void ui::MainWindow::SaveChanges()
     if (invalid.empty()) invalid = validate_variables(m_reviewCurMachine);
     if (!invalid.empty())
     {
-        MessageBoxW(m_hwnd, invalid.c_str(), L"environ \x2014 Cannot apply", MB_OK | MB_ICONERROR);
+        ShowMsgBox(L"environ \x2014 Cannot apply", invalid);
         return;
     }
 
@@ -272,7 +272,7 @@ void ui::MainWindow::SaveChanges()
     if (m_reviewUser.empty() && m_reviewMachine.empty())
     {
         // Edits exist per-row but net to the original values (e.g. edited back).
-        MessageBoxW(m_hwnd, L"No effective changes to apply.", L"environ", MB_OK | MB_ICONINFORMATION);
+        ShowMsgBox(L"environ", L"No effective changes to apply.");
         return;
     }
 
@@ -287,6 +287,48 @@ void ui::MainWindow::CancelReview()
     InvalidateRect(m_hwnd, nullptr, FALSE); // edits are kept
 }
 
+// --- Message box overlay ---
+
+void ui::MainWindow::ShowMsgBox(std::wstring title, std::wstring body)
+{
+    m_msgBox.open = true;
+    m_msgBox.title = std::move(title);
+    m_msgBox.body = std::move(body);
+    m_msgBox.hasCancel = false;
+    m_msgBox.hover = -1;
+    m_msgBox.onOk = {};
+    m_eatNextDblClk = true;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void ui::MainWindow::ShowMsgBox(std::wstring title, std::wstring body, std::function<void()> onOk)
+{
+    m_msgBox.open = true;
+    m_msgBox.title = std::move(title);
+    m_msgBox.body = std::move(body);
+    m_msgBox.hasCancel = true;
+    m_msgBox.hover = -1;
+    m_msgBox.onOk = std::move(onOk);
+    m_eatNextDblClk = true;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void ui::MainWindow::DismissMsgBox()
+{
+    m_msgBox.open = false;
+    m_eatNextDblClk = true;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void ui::MainWindow::AcceptMsgBox()
+{
+    auto cb{std::move(m_msgBox.onOk)};
+    m_msgBox.open = false;
+    m_eatNextDblClk = true;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+    if (cb) cb();
+}
+
 void ui::MainWindow::ApplyReviewed()
 {
     using namespace Environ::core;
@@ -296,12 +338,20 @@ void ui::MainWindow::ApplyReviewed()
     const bool externalChange{
         !compute_diff(m_grid.OriginalVars(Scope::User), read_variables(Scope::User)).empty() ||
         !compute_diff(m_grid.OriginalVars(Scope::Machine), read_variables(Scope::Machine)).empty()};
-    if (externalChange &&
-        MessageBoxW(m_hwnd,
-                    L"The environment changed outside environ since it was loaded. "
-                    L"Applying now may overwrite those external changes.\n\nContinue?",
-                    L"environ \x2014 External change detected", MB_OKCANCEL | MB_ICONWARNING) != IDOK)
-        return; // keep the review panel open so the user can re-check or cancel
+    if (externalChange)
+    {
+        ShowMsgBox(L"environ \x2014 External change detected",
+                   L"The environment changed outside environ since it was loaded. "
+                   L"Applying now may overwrite those external changes.\n\nContinue?",
+                   [this]() { DoApply(); });
+        return;
+    }
+    DoApply();
+}
+
+void ui::MainWindow::DoApply()
+{
+    using namespace Environ::core;
 
     // Snapshot the current registry state before overwriting it.
     {
@@ -329,7 +379,7 @@ void ui::MainWindow::ApplyReviewed()
         std::wstring err{L"Some changes could not be applied; your edits are kept so you can retry.\n\n"};
         if (!result.user.error.empty()) err += L"User: " + result.user.error + L'\n';
         if (!result.machine.error.empty()) err += L"Machine: " + result.machine.error + L'\n';
-        MessageBoxW(m_hwnd, err.c_str(), L"environ \x2014 Apply failed", MB_OK | MB_ICONERROR);
+        ShowMsgBox(L"environ \x2014 Apply failed", err);
     }
     InvalidateRect(m_hwnd, nullptr, FALSE);
 }
@@ -359,6 +409,55 @@ ui::MainWindow::ReviewGeom ui::MainWindow::ReviewLayout(const D2D1_SIZE_F& sz)
     const float by{g.card.bottom - pad - bh};
     g.applyBtn = D2D1::RectF(g.card.right - pad - bw, by, g.card.right - pad, by + bh);
     g.cancelBtn = D2D1::RectF(g.applyBtn.left - 12.0f - bw, by, g.applyBtn.left - 12.0f, by + bh);
+    return g;
+}
+
+// --- Message box layout ---
+
+ui::MainWindow::MsgBoxGeom ui::MainWindow::MsgBoxLayout(const D2D1_SIZE_F& sz)
+{
+    const float pad{20.0f};
+    const float titleH{36.0f};
+    const float btnRow{56.0f};
+    const float cw{std::min(480.0f, sz.width - 80.0f)};
+
+    // Measure body text height with word wrapping.
+    const float maxBodyW{cw - 2.0f * pad};
+    float bodyH{40.0f}; // fallback
+    if (m_dw)
+    {
+        IDWriteTextLayout* layout{nullptr};
+        m_dw->CreateTextLayout(m_msgBox.body.c_str(),
+                               static_cast<UINT32>(m_msgBox.body.size()),
+                               m_fmtValue.get(), maxBodyW, 9999.0f, &layout);
+        if (layout)
+        {
+            DWRITE_TEXT_METRICS metrics{};
+            layout->GetMetrics(&metrics);
+            bodyH = std::min(metrics.height, sz.height * 0.4f);
+            layout->Release();
+        }
+    }
+
+    const float ch{pad + titleH + bodyH + 12.0f + btnRow + pad};
+    const float cx{(sz.width - cw) / 2.0f};
+    const float cy{(sz.height - ch) / 2.0f};
+
+    MsgBoxGeom g{};
+    g.card = D2D1::RectF(cx, cy, cx + cw, cy + ch);
+    g.bodyRect = D2D1::RectF(cx + pad, cy + pad + titleH,
+                              cx + cw - pad, cy + pad + titleH + bodyH);
+
+    constexpr float bw{96.0f};
+    constexpr float bh{34.0f};
+    const float by{g.card.bottom - pad - bh};
+
+    g.okBtn = D2D1::RectF(g.card.right - pad - bw, by, g.card.right - pad, by + bh);
+    if (m_msgBox.hasCancel)
+        g.cancelBtn = D2D1::RectF(g.okBtn.left - 12.0f - bw, by, g.okBtn.left - 12.0f, by + bh);
+    else
+        g.cancelBtn = D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
+
     return g;
 }
 
@@ -414,6 +513,58 @@ void ui::MainWindow::PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F&
 
     DrawReviewButton(g.cancelBtn, L"Cancel", false, m_reviewHover == 0, s);
     DrawReviewButton(g.applyBtn, L"Apply", true, m_reviewHover == 1, s);
+}
+
+void ui::MainWindow::PaintMsgBox(const theme::ColorScheme& s, const D2D1_SIZE_F& sz)
+{
+    const MsgBoxGeom g{MsgBoxLayout(sz)};
+
+    // Scrim
+    m_brush->SetColor(s.scrim);
+    m_rt->FillRectangle(D2D1::RectF(0.0f, 0.0f, sz.width, sz.height), m_brush);
+
+    // Card
+    m_brush->SetColor(s.card.fill);
+    m_rt->FillRoundedRectangle(D2D1::RoundedRect(g.card, 10.0f, 10.0f), m_brush);
+    m_brush->SetColor(s.card.border);
+    m_rt->DrawRoundedRectangle(D2D1::RoundedRect(g.card, 10.0f, 10.0f), m_brush, 1.0f);
+
+    // Title
+    DrawString(m_msgBox.title, m_fmtName.get(),
+               D2D1::RectF(g.card.left + 20.0f, g.card.top + 12.0f,
+                            g.card.right - 20.0f, g.card.top + 44.0f),
+               s.headerText);
+
+    // Body (word-wrapped via IDWriteTextLayout)
+    if (m_dw)
+    {
+        const float maxBodyW{g.bodyRect.right - g.bodyRect.left};
+        const float maxBodyH{g.bodyRect.bottom - g.bodyRect.top};
+        IDWriteTextLayout* layout{nullptr};
+        m_dw->CreateTextLayout(m_msgBox.body.c_str(),
+                               static_cast<UINT32>(m_msgBox.body.size()),
+                               m_fmtValue.get(), maxBodyW, maxBodyH, &layout);
+        if (layout)
+        {
+            m_rt->PushAxisAlignedClip(g.bodyRect, D2D1_ANTIALIAS_MODE_ALIASED);
+            m_brush->SetColor(s.headerText);
+            m_rt->DrawTextLayout(D2D1::Point2F(g.bodyRect.left, g.bodyRect.top),
+                                 layout, m_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            m_rt->PopAxisAlignedClip();
+            layout->Release();
+        }
+    }
+
+    // Buttons
+    if (m_msgBox.hasCancel)
+    {
+        DrawReviewButton(g.cancelBtn, L"Cancel", false, m_msgBox.hover == 0, s);
+        DrawReviewButton(g.okBtn, L"OK", true, m_msgBox.hover == 1, s);
+    }
+    else
+    {
+        DrawReviewButton(g.okBtn, L"OK", true, m_msgBox.hover == 0, s);
+    }
 }
 
 // --- Nav panel ---
@@ -589,6 +740,7 @@ void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
                D2D1::RectF(footerLeft, sz.height - 28.0f, sz.width - 16.0f, sz.height - 8.0f), s.headerSubtext);
 
     if (m_reviewOpen) PaintReview(s, sz);
+    if (m_msgBox.open) PaintMsgBox(s, sz);
 }
 
 // --- Virtual hooks ---
@@ -630,6 +782,60 @@ void ui::MainWindow::OnDestroy()
 
 LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
 {
+    // Message box sits on top of everything; it owns input when open.
+    if (m_msgBox.open)
+    {
+        switch (msg)
+        {
+        case WM_KEYDOWN:
+            if (wp == VK_RETURN) AcceptMsgBox();
+            else if (wp == VK_ESCAPE) DismissMsgBox();
+            return 0;
+        case WM_MOUSEWHEEL:
+            return 0;
+        case WM_MOUSEMOVE:
+            if (m_rt)
+            {
+                const float scale{DipScale()};
+                const float x{GET_X_LPARAM(lp) / scale}, my{GET_Y_LPARAM(lp) / scale};
+                const MsgBoxGeom g{MsgBoxLayout(m_rt->GetSize())};
+                int hover{-1};
+                if (m_msgBox.hasCancel)
+                {
+                    if (Contains(g.cancelBtn, x, my)) hover = 0;
+                    else if (Contains(g.okBtn, x, my)) hover = 1;
+                }
+                else
+                {
+                    if (Contains(g.okBtn, x, my)) hover = 0;
+                }
+                if (hover != m_msgBox.hover) { m_msgBox.hover = hover; InvalidateRect(m_hwnd, nullptr, FALSE); }
+            }
+            return 0;
+        case WM_LBUTTONDOWN:
+            if (m_rt)
+            {
+                const float scale{DipScale()};
+                const float x{GET_X_LPARAM(lp) / scale}, my{GET_Y_LPARAM(lp) / scale};
+                const MsgBoxGeom g{MsgBoxLayout(m_rt->GetSize())};
+                if (Contains(g.okBtn, x, my)) AcceptMsgBox();
+                else if (m_msgBox.hasCancel && Contains(g.cancelBtn, x, my)) DismissMsgBox();
+                else if (!Contains(g.card, x, my)) DismissMsgBox();
+            }
+            return 0;
+        case WM_LBUTTONUP:
+            return 0;
+        case WM_LBUTTONDBLCLK:
+            return 0;
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+        case WM_CONTEXTMENU:
+            return 0;
+        default:
+            break;
+        }
+    }
+
     // While the apply-review modal is open it owns input; paint/size/etc. fall through.
     if (m_reviewOpen)
     {
