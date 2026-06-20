@@ -64,7 +64,7 @@ protected:
 
     // Caption
     void DrawCaption(const theme::ColorScheme& s, float widthDip,
-                     const wchar_t* title);
+                     const wchar_t* title, float titleLeftInset = 0.0f);
     void ApplyDarkTitleBar(bool dark);
 
     // Caption interaction helpers (for subclass message handlers)

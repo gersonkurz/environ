@@ -43,6 +43,13 @@ namespace
         return dir + L"\\theme.toml";
     }
 
+    // Nav panel constants.
+    constexpr float kBurgerW{46.0f};
+    constexpr float kBurgerH{40.0f};
+    constexpr float kNavWidth{220.0f};
+    constexpr float kNavItemH{36.0f};
+    constexpr wchar_t kGlyphBurger{0xE700}; // Segoe Fluent Icons "GlobalNavigationButton"
+
     // Context menu item IDs (used by WM_COMMAND for owner-draw menu dispatching).
     constexpr UINT kMenuCopy{1001};
     constexpr UINT kMenuInsert{1002};
@@ -187,9 +194,10 @@ ui::ViewContext ui::MainWindow::MakeContext() const
 D2D1_RECT_F ui::MainWindow::ViewBounds(const D2D1_SIZE_F& sz) const
 {
     const float pad{16.0f};
+    const float left{m_navOpen ? kNavWidth : pad};
     // View sits between caption (48 DIP) and footer (bottom 28 DIP),
     // with a 4 DIP gap above the footer for spacing.
-    return D2D1::RectF(pad, 40.0f + 8.0f, sz.width - pad, sz.height - 32.0f);
+    return D2D1::RectF(left, 40.0f + 8.0f, sz.width - pad, sz.height - 32.0f);
 }
 
 void ui::MainWindow::SwitchToView(View* view)
@@ -408,22 +416,177 @@ void ui::MainWindow::PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F&
     DrawReviewButton(g.applyBtn, L"Apply", true, m_reviewHover == 1, s);
 }
 
+// --- Nav panel ---
+
+int ui::MainWindow::NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const
+{
+    if (!m_navOpen) return -1;
+    // Panel rect: (0, 48, kNavWidth, sz.height - 32)
+    if (x < 0.0f || x >= kNavWidth || y < 48.0f || y >= sz.height - 32.0f)
+        return -1;
+
+    // Items start at panel top (48) + 8 padding.
+    // Section header "THEME" (not clickable): 36 DIP
+    // Items 0,1,2 (Dark/Light/Blue): 36 DIP each
+    // Gap: 12 DIP
+    // Items 3,4 (History/Save): 36 DIP each
+    const float startY{48.0f + 8.0f};
+    const float afterHeader{startY + kNavItemH}; // after "THEME" header
+    if (y >= afterHeader && y < afterHeader + 3 * kNavItemH)
+    {
+        return static_cast<int>((y - afterHeader) / kNavItemH); // 0,1,2
+    }
+    const float afterGap{afterHeader + 3 * kNavItemH + 12.0f};
+    if (y >= afterGap && y < afterGap + 2 * kNavItemH)
+    {
+        return 3 + static_cast<int>((y - afterGap) / kNavItemH); // 3,4
+    }
+    return -1;
+}
+
+void ui::MainWindow::HandleNavClick(int item)
+{
+    const auto ctx{MakeContext()};
+    switch (item)
+    {
+    case 0: case 1: case 2:
+    {
+        const char* names[]{"dark", "light", "blue"};
+        if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
+        if (m_theme.SelectByName(names[item]))
+        {
+            ApplyTitleBar();
+            m_gridView.RefreshEditBrush();
+            m_settings.appearance.theme.set(m_theme.Current().name);
+            m_settings.save();
+        }
+        break;
+    }
+    case 3: // History
+        if (m_activeView == &m_historyView)
+            SwitchToView(&m_gridView);
+        else
+        {
+            if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
+            SwitchToView(&m_historyView);
+        }
+        break;
+    case 4: // Save
+        SaveChanges();
+        break;
+    }
+}
+
+void ui::MainWindow::PaintNav(const theme::ColorScheme& s, const D2D1_SIZE_F& sz)
+{
+    // Panel background
+    const D2D1_RECT_F panel{D2D1::RectF(0.0f, 48.0f, kNavWidth, sz.height - 32.0f)};
+    m_brush->SetColor(s.card.fill);
+    m_rt->FillRectangle(panel, m_brush);
+
+    // Right edge border
+    m_brush->SetColor(s.card.border);
+    m_rt->DrawLine(D2D1::Point2F(kNavWidth, 48.0f),
+                   D2D1::Point2F(kNavWidth, sz.height - 32.0f), m_brush, 1.0f);
+
+    const float startY{48.0f + 8.0f};
+    const float padLeft{16.0f};
+    const float padRight{kNavWidth - 12.0f};
+
+    // Section header: "THEME"
+    DrawString(L"THEME", m_fmtHeader.get(),
+               D2D1::RectF(padLeft, startY, padRight, startY + kNavItemH), s.headerSubtext);
+
+    // Theme items
+    const wchar_t* themeLabels[]{L"Dark", L"Light", L"Blue"};
+    const wchar_t* themeHints[]{L"F1", L"F2", L"F3"};
+    const auto& curName{m_theme.Current().name};
+    const std::string itemNames[]{"dark", "light", "blue"};
+
+    for (int i{0}; i < 3; ++i)
+    {
+        const float iy{startY + kNavItemH + i * kNavItemH};
+        const D2D1_RECT_F itemRect{D2D1::RectF(0.0f, iy, kNavWidth, iy + kNavItemH)};
+        const bool hovered{m_navHover == i};
+        const bool active{curName == itemNames[i]};
+
+        if (hovered)
+        {
+            m_brush->SetColor(s.rowHover.fill);
+            m_rt->FillRectangle(itemRect, m_brush);
+        }
+
+        // Label
+        const D2D1_COLOR_F labelColor{hovered ? s.rowHover.text : (active ? s.accent : s.headerText)};
+        std::wstring label{themeLabels[i]};
+        if (active) label = L"\x2022  " + label; // bullet for active theme
+        DrawString(label, m_fmtValue.get(),
+                   D2D1::RectF(padLeft, iy, padRight - 40.0f, iy + kNavItemH), labelColor);
+
+        // Right-aligned hint
+        DrawString(themeHints[i], m_fmtValue.get(),
+                   D2D1::RectF(padRight - 40.0f, iy, padRight, iy + kNavItemH), s.headerSubtext);
+    }
+
+    // Gap (12 DIP), then History + Save
+    const float groupY{startY + kNavItemH + 3 * kNavItemH + 12.0f};
+    const wchar_t* actionLabels[]{L"History", L"Save"};
+    const wchar_t* actionHints[]{L"Ctrl+H", L"Ctrl+S"};
+
+    for (int i{0}; i < 2; ++i)
+    {
+        const int idx{3 + i};
+        const float iy{groupY + i * kNavItemH};
+        const D2D1_RECT_F itemRect{D2D1::RectF(0.0f, iy, kNavWidth, iy + kNavItemH)};
+        const bool hovered{m_navHover == idx};
+
+        if (hovered)
+        {
+            m_brush->SetColor(s.rowHover.fill);
+            m_rt->FillRectangle(itemRect, m_brush);
+        }
+
+        const D2D1_COLOR_F labelColor{hovered ? s.rowHover.text : s.headerText};
+        DrawString(actionLabels[i], m_fmtValue.get(),
+                   D2D1::RectF(padLeft, iy, padRight - 60.0f, iy + kNavItemH), labelColor);
+
+        DrawString(actionHints[i], m_fmtValue.get(),
+                   D2D1::RectF(padRight - 60.0f, iy, padRight, iy + kNavItemH), s.headerSubtext);
+    }
+}
+
 void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
 {
     const theme::ColorScheme& s{m_theme.Current()};
     m_rt->Clear(s.windowBg);
 
-    DrawCaption(s, sz.width, L"environ");
+    DrawCaption(s, sz.width, L"environ", kBurgerW);
+
+    // Burger button (painted over caption area)
+    {
+        const D2D1_RECT_F burgerRect{D2D1::RectF(0.0f, 0.0f, kBurgerW, kBurgerH)};
+        if (m_navBurgerHover)
+        {
+            m_brush->SetColor(s.rowHover.fill);
+            m_rt->FillRectangle(burgerRect, m_brush);
+        }
+        m_brush->SetColor(s.headerText);
+        m_rt->DrawTextW(&kGlyphBurger, 1, m_fmtGlyph.get(), burgerRect, m_brush,
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
+    // Nav panel (below caption, above footer)
+    if (m_navOpen) PaintNav(s, sz);
 
     const auto ctx{MakeContext()};
     const auto bounds{ViewBounds(sz)};
     m_activeView->Paint(ctx, bounds);
 
     // Footer: active view provides the text.
-    const float pad{16.0f};
+    const float footerLeft{m_navOpen ? kNavWidth : 16.0f};
     const std::wstring footer{m_activeView->GetStatusText(ctx)};
     DrawString(footer, m_fmtSub.get(),
-               D2D1::RectF(pad, sz.height - 28.0f, sz.width - pad, sz.height - 8.0f), s.headerSubtext);
+               D2D1::RectF(footerLeft, sz.height - 28.0f, sz.width - 16.0f, sz.height - 8.0f), s.headerSubtext);
 
     if (m_reviewOpen) PaintReview(s, sz);
 }
@@ -512,6 +675,18 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         }
     }
 
+    // Burger button must return HTCLIENT so it's clickable, not draggable.
+    if (msg == WM_NCHITTEST)
+    {
+        POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        ScreenToClient(m_hwnd, &pt);
+        const float scale{DipScale()};
+        const float xDip{pt.x / scale}, yDip{pt.y / scale};
+        if (xDip >= 0.0f && xDip < kBurgerW && yDip >= 0.0f && yDip < kBurgerH)
+            return HTCLIENT;
+        return D2DWindow::HandleMessage(msg, wp, lp);
+    }
+
     const auto ctx{MakeContext()};
     switch (msg)
     {
@@ -524,6 +699,13 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         break; // DefWindowProc handles other system keys (Alt+F4, Alt+Space, ...)
     case WM_KEYDOWN:
     {
+        // Esc closes nav panel before anything else.
+        if (m_navOpen && wp == VK_ESCAPE)
+        {
+            m_navOpen = false;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return 0;
+        }
         // Grid-only shortcuts: Ctrl+S, Ctrl+C.
         if (m_activeView == &m_gridView)
         {
@@ -588,7 +770,21 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         RECT rc{};
         GetClientRect(m_hwnd, &rc);
         const float xDip{GET_X_LPARAM(lp) / scale}, yDip{GET_Y_LPARAM(lp) / scale};
-        bool need{UpdateCaptionHover(xDip, yDip, rc.right / scale)};
+        const float wDip{rc.right / scale};
+
+        // Burger button hover
+        const bool burgerHover{xDip >= 0.0f && xDip < kBurgerW && yDip >= 0.0f && yDip < kBurgerH};
+        bool need{false};
+        if (burgerHover != m_navBurgerHover) { m_navBurgerHover = burgerHover; need = true; }
+
+        // Nav item hover
+        if (m_navOpen && m_rt)
+        {
+            const int navItem{NavItemAt(xDip, yDip, m_rt->GetSize())};
+            if (navItem != m_navHover) { m_navHover = navItem; need = true; }
+        }
+
+        need |= UpdateCaptionHover(xDip, yDip, wDip);
         need |= m_activeView->OnMouseMove(ctx, xDip, yDip);
         Repaint(need);
         return 0;
@@ -596,6 +792,8 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
     case WM_MOUSELEAVE:
     {
         bool need{ResetCaptionTracking()};
+        if (m_navBurgerHover) { m_navBurgerHover = false; need = true; }
+        if (m_navHover != -1) { m_navHover = -1; need = true; }
         need |= m_activeView->OnMouseLeave();
         Repaint(need);
         return 0;
@@ -607,6 +805,39 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         RECT rc{};
         GetClientRect(m_hwnd, &rc);
         const float xDip{GET_X_LPARAM(lp) / scale}, yDip{GET_Y_LPARAM(lp) / scale};
+
+        // Burger button: toggle nav panel
+        if (xDip >= 0.0f && xDip < kBurgerW && yDip >= 0.0f && yDip < kBurgerH)
+        {
+            m_navOpen = !m_navOpen;
+            m_navHover = -1;
+            m_eatNextDblClk = true;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return 0;
+        }
+
+        // Nav panel click: dispatch item or close
+        if (m_navOpen)
+        {
+            if (m_rt)
+            {
+                const int item{NavItemAt(xDip, yDip, m_rt->GetSize())};
+                if (item >= 0)
+                {
+                    HandleNavClick(item);
+                    m_navOpen = false;
+                    m_navHover = -1;
+                    m_eatNextDblClk = true;
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                    return 0;
+                }
+            }
+            // Click outside nav panel area: close nav, fall through to normal dispatch
+            m_navOpen = false;
+            m_navHover = -1;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+
         if (HandleCaptionClick(xDip, yDip, rc.right / scale)) return 0;
         SetFocus(m_hwnd);
         SetCapture(m_hwnd);

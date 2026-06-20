@@ -290,7 +290,7 @@ std::wstring ui::HistoryView::GetStatusText(const ViewContext& ctx) const
 {
     const theme::ColorScheme& s{*ctx.scheme};
     std::wstring footer{std::format(
-        L"{}   \x2022   \x2191\x2193 navigate   \x2022   Enter restore   \x2022   Del delete   \x2022   Esc close   \x2022   F1/F2/F3 theme",
+        L"{}   \x2022   \x2191\x2193 navigate   \x2022   Enter restore   \x2022   Del delete   \x2022   Esc close",
         std::wstring(s.name.begin(), s.name.end()))};
     if (ctx.zoom != 1.0f)
         footer += std::format(L"   \x2022   {}%", static_cast<int>(ctx.zoom * 100));

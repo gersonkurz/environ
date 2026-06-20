@@ -192,7 +192,7 @@ std::wstring ui::GridView::GetStatusText(const ViewContext& ctx) const
 {
     const theme::ColorScheme& s{*ctx.scheme};
     std::wstring footer = std::format(
-        L"{}   \x2022   {} user, {} machine{}   \x2022   Ins/Del/Alt+\x2191\x2193 entries   \x2022   Ctrl+C copy   \x2022   Ctrl+S apply   \x2022   Ctrl+H history   \x2022   F1/F2/F3 theme",
+        L"{}   \x2022   {} user, {} machine{}",
         std::wstring(s.name.begin(), s.name.end()), m_userCount, m_machineCount,
         m_elevated ? L"" : L"  (machine read-only)");
     if (ctx.zoom != 1.0f)

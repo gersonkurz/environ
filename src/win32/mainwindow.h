@@ -39,6 +39,7 @@ private:
     // Painting
     void DrawReviewButton(const D2D1_RECT_F& r, const wchar_t* label,
                           bool primary, bool hover, const theme::ColorScheme& s);
+    void PaintNav(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
     void PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
 
     // Fonts
@@ -52,6 +53,10 @@ private:
     void SaveChanges();
     void CancelReview();
     void ApplyReviewed();
+
+    // Nav panel
+    int  NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const;
+    void HandleNavClick(int item);
 
     // View plumbing
     ViewContext MakeContext() const;
@@ -84,6 +89,11 @@ private:
     GridView    m_gridView{m_grid, m_theme};
     HistoryView m_historyView{m_snapshots};
     View*       m_activeView{&m_gridView};
+
+    // Nav panel
+    bool m_navOpen{false};
+    int  m_navHover{-1};
+    bool m_navBurgerHover{false};
 
     // Review modal
     bool m_reviewOpen{false};

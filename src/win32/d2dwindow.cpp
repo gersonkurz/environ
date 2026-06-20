@@ -161,10 +161,10 @@ void ui::D2DWindow::DrawString(const std::wstring& s, IDWriteTextFormat* fmt,
 // --- Caption ---
 
 void ui::D2DWindow::DrawCaption(const theme::ColorScheme& s, float widthDip,
-                                 const wchar_t* title)
+                                 const wchar_t* title, float titleLeftInset)
 {
     DrawString(title, m_fmtCaption.get(),
-             D2D1::RectF(14.0f, 0.0f, widthDip - 3 * kBtnW - 8.0f, kCaptionH), s.headerText);
+             D2D1::RectF(14.0f + titleLeftInset, 0.0f, widthDip - 3 * kBtnW - 8.0f, kCaptionH), s.headerText);
 
     const CaptionButtons b = CaptionButtonRects(widthDip);
     const bool zoomed = IsZoomed(m_hwnd) != 0;
