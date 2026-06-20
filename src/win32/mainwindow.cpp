@@ -232,6 +232,28 @@ void ui::MainWindow::ApplyHistoryRestore()
     m_gridView.SetCounts(data.snapUser.size(), data.snapMachine.size());
 }
 
+void ui::MainWindow::CheckThemeAction()
+{
+    if (m_themeView.ThemeChanged())
+    {
+        m_themeView.ClearThemeChanged();
+        ApplyThemeChange();
+    }
+    const auto action{m_themeView.PendingAction()};
+    if (action == ThemeSelectionView::Action::None) return;
+    m_themeView.ClearPendingAction();
+    m_eatNextDblClk = true;
+    SwitchToView(&m_gridView);
+}
+
+void ui::MainWindow::ApplyThemeChange()
+{
+    ApplyTitleBar();
+    m_gridView.RefreshEditBrush();
+    m_settings.appearance.theme.set(m_theme.Current().name);
+    m_settings.save();
+}
+
 // --- Data / save ---
 
 void ui::MainWindow::LoadData()
@@ -576,10 +598,10 @@ int ui::MainWindow::NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const
         return -1;
 
     // Items start at panel top (48) + 8 padding.
-    // Items 0,1 (History/Save): 36 DIP each
+    // Items 0,1,2 (Themes/History/Save): 36 DIP each
     const float startY{48.0f + 8.0f};
-    if (y >= startY && y < startY + 2 * kNavItemH)
-        return static_cast<int>((y - startY) / kNavItemH); // 0,1
+    if (y >= startY && y < startY + 3 * kNavItemH)
+        return static_cast<int>((y - startY) / kNavItemH); // 0,1,2
     return -1;
 }
 
@@ -588,7 +610,16 @@ void ui::MainWindow::HandleNavClick(int item)
     const auto ctx{MakeContext()};
     switch (item)
     {
-    case 0: // History
+    case 0: // Themes
+        if (m_activeView == &m_themeView)
+            SwitchToView(&m_gridView);
+        else
+        {
+            if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
+            SwitchToView(&m_themeView);
+        }
+        break;
+    case 1: // History
         if (m_activeView == &m_historyView)
             SwitchToView(&m_gridView);
         else
@@ -597,7 +628,7 @@ void ui::MainWindow::HandleNavClick(int item)
             SwitchToView(&m_historyView);
         }
         break;
-    case 1: // Save
+    case 2: // Save
         SaveChanges();
         break;
     }
@@ -619,10 +650,10 @@ void ui::MainWindow::PaintNav(const theme::ColorScheme& s, const D2D1_SIZE_F& sz
     const float padLeft{16.0f};
     const float padRight{kNavWidth - 12.0f};
 
-    const wchar_t* labels[]{L"History", L"Save"};
-    const wchar_t* hints[]{L"Ctrl+H", L"Ctrl+S"};
+    const wchar_t* labels[]{L"Themes", L"History", L"Save"};
+    const wchar_t* hints[]{L"", L"Ctrl+H", L"Ctrl+S"};
 
-    for (int i{0}; i < 2; ++i)
+    for (int i{0}; i < 3; ++i)
     {
         const float iy{startY + i * kNavItemH};
         const D2D1_RECT_F itemRect{D2D1::RectF(0.0f, iy, kNavWidth, iy + kNavItemH)};
@@ -886,6 +917,7 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         // Delegate to active view.
         Repaint(m_activeView->OnKey(ctx, static_cast<int>(wp)));
         CheckHistoryAction();
+        CheckThemeAction();
         return 0;
     }
     case WM_MOUSEMOVE:
@@ -970,6 +1002,7 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         const bool ctrl{(GetKeyState(VK_CONTROL) & 0x8000) != 0};
         Repaint(m_activeView->OnLButtonDown(ctx, xDip, yDip, shift, ctrl));
         CheckHistoryAction();
+        CheckThemeAction();
         return 0;
     }
     case WM_LBUTTONUP:

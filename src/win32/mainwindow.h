@@ -4,6 +4,7 @@
 #include "grid.h"
 #include "gridview.h"
 #include "historyview.h"
+#include "themeselectionview.h"
 #include "AppSettings.h"
 #include "EnvStore.h"
 #include "EnvWriter.h"
@@ -86,6 +87,8 @@ private:
     void SwitchToView(View* view);
     void CheckHistoryAction();
     void ApplyHistoryRestore();
+    void CheckThemeAction();
+    void ApplyThemeChange();
 
     // Review layout
     ReviewGeom ReviewLayout(const D2D1_SIZE_F& sz);
@@ -108,9 +111,10 @@ private:
     float  m_zoom{1.0f};
 
     // View layer
-    GridView    m_gridView{m_grid, m_theme};
-    HistoryView m_historyView{m_snapshots};
-    View*       m_activeView{&m_gridView};
+    GridView            m_gridView{m_grid, m_theme};
+    HistoryView         m_historyView{m_snapshots};
+    ThemeSelectionView  m_themeView{m_theme};
+    View*               m_activeView{&m_gridView};
 
     // Nav panel
     bool m_navOpen{false};
