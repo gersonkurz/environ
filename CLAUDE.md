@@ -5,10 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 A Windows 11 environment-variable editor — a modern replacement for the built-in dialog.
 **Pure Win32 + Direct2D + DirectWrite, C++20, MSVC.** No WinRT, no C#, no .NET, no vcpkg.
-Our own code is exception-free. Goal: one small self-contained exe (~300 KB), instant startup.
+Our own code is exception-free. Goal: one small self-contained exe, instant startup.
 
-See `docs/ROADMAP.md` for direction and phases, and the active `docs/PHASE-*.md` for the
-current slice (Phase 3 — apply/save — as of this writing).
+See `docs/ROADMAP.md` for direction and phases.
 
 ## Direction — READ THIS FIRST
 The UI host was **rewritten from WinUI to pure Win32 + Direct2D/DirectWrite** (2026-05-30),
@@ -20,10 +19,9 @@ starts instantly.
   **This is where UI work goes.**
 - **`src/core/`** — plain C++20 logic (`Environ::core`). No Win32/UI, no WinRT. **Stays.**
   Reused unchanged by the new host.
-- The retired WinUI code (`scratch/`, `src/ui/`) has been deleted.
 
 ## Build & run
-Requires: VS 2025 (v145 toolset), `msbuild` on PATH, `just`.
+Requires: VS 2026 (v145 toolset), `msbuild` on PATH, `just`.
 ```
 just build             # Debug, native arch (x64 or ARM64 via %PROCESSOR_ARCHITECTURE%)
 just release           # Release, native arch
@@ -36,17 +34,26 @@ Or directly: `msbuild environ.vcxproj /p:Configuration=Debug /p:Platform=x64 /m`
 
 - Project: `environ.vcxproj` (precompiled headers via `precomp.h`/`precomp.cpp`).
 - Output: `bin\x64\Debug\environ.exe`, `bin\x64\Release\environ.exe`, etc.
-- Theme: `theme.toml` is loaded from beside the exe, falling back to built-in
-  dark/light/blue if absent.
-- No automated test suite. **The gate is: builds clean at `/W4`, zero warnings.**
+- Themes: Base16 `.yaml` files in a `themes/` directory beside the exe (16 ship in
+  `themes/` at the repo root and are copied next to the build output). Falls back to a
+  built-in dark scheme if the directory is empty or missing.
+- No automated test suite YET. **The gate is: builds clean at `/W4`, zero warnings.**
 
 ## Architecture
 ### Host (`src/win32/`)
 - Pure Win32 + D2D/DWrite. Paint-on-change, **no animation** (deliberate — favors speed).
-- **Theme table** (`theme.h`/`theme.cpp`/`theme.toml`): a `ColorScheme` of named per-state
-  `Style`s; every painter reads from it. Inspired by ProAKT's `DataSet`/`ColorScheme`.
-  **No hardcoded color literals in painting code.** New states go in both the built-in
-  fallback (`theme.cpp`) and `theme.toml`.
+- **View abstraction** (`view.h`): `MainWindow` is a shell (title bar, footer, hamburger
+  nav) that hosts one `View` at a time. `GridView` is the default; `HistoryView` and
+  `ThemeSelectionView` are the others. A `View` paints into and receives input via a
+  `ViewContext` passed by const-ref each call — Views never cache it. Add new screens as
+  `View` subclasses, not as ad-hoc window code.
+- **Theme table** (`theme.h`/`theme.cpp`): a `ColorScheme` of named per-state `Style`s;
+  every painter reads from it. Inspired by ProAKT's `DataSet`/`ColorScheme`. Schemes are
+  **Base16 YAML files loaded from a `themes/` directory beside the exe** (`ThemeSet::LoadFromDirectory`),
+  mapping the 16-color palette deterministically onto the `ColorScheme`. Falls back to a
+  single hardcoded dark scheme if `themes/` is empty/missing. **No hardcoded color literals
+  in painting code.** New *states* go in both the hardcoded fallback (`theme.cpp`) and the
+  Base16 mapping; you don't edit individual `.yaml` files to add a state.
 - Custom-drawn everything, except the transient inline cell editor → a skinned standard
   `EDIT` (borderless, `WM_CTLCOLOREDIT`).
 - Direct2D device-loss must be handled (`D2DERR_RECREATE_TARGET` → discard + recreate).
@@ -73,7 +80,7 @@ Or directly: `msbuild environ.vcxproj /p:Configuration=Debug /p:Platform=x64 /m`
   visibly — never silently fail or succeed.
 - **Exceptions:** our own code is exception-free (HRESULT / return codes / `std::optional`).
   `/EHsc` is enabled because toml++ and the STL need it. Do not introduce `throw`/`catch`
-  in our code.
+  in our code unless absolutely needed.
 
 ## Code style
 - C++20: concepts, ranges, `std::format`, structured bindings where they clarify — not to show off.
@@ -94,13 +101,13 @@ Or directly: `msbuild environ.vcxproj /p:Configuration=Debug /p:Platform=x64 /m`
 
 ## If the build breaks, check in this order
 1. Is `msbuild` on PATH? (run from a VS Developer Command Prompt or use `vsdevcmd`.)
-2. Are the `Extern/` dependencies present (toml++, pnq, spdlog, sqlite3-amalgamation)?
+2. Are the `extern/` submodules present (pnq, spdlog, toml++, sqlite3-amalgamation, fkYAML)?
+   Run `git submodule update --init --recursive` if any are missing.
 3. Compiler/linker errors in `src/win32/` or `src/core/` — read them; don't guess.
 
 ## Do not
 - Add dependencies without asking — the dependency list is deliberately minimal.
 - Introduce vcpkg. Not negotiable.
-- Resume work in the retired hosts (`scratch/EnvironNativeBaseline/`, `src/ui/`).
 - Hardcode colors/fonts in painting code — go through the theme table.
 - Add "Generated by Claude" / `Co-Authored-By` / any AI attribution to commits. Commit
   messages are plain English: what changed and why, nothing else.

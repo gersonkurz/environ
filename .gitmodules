@@ -10,6 +10,6 @@
 [submodule "extern/sqlite3"]
 	path = extern/sqlite3
 	url = https://github.com/gittiver/sqlite3-amalgamation
-[submodule "Extern/fkYAML"]
-	path = Extern/fkYAML
+[submodule "extern/fkYAML"]
+	path = extern/fkYAML
 	url = https://github.com/fktn-k/fkYAML.git

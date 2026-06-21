@@ -20,9 +20,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="framework.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="targetver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -54,6 +51,27 @@
       <Filter>src\win32</Filter>
     </ClInclude>
     <ClInclude Include="precomp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win32\app.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win32\d2dwindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win32\mainwindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win32\gridview.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win32\historyview.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win32\view.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win32\themeselectionview.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -99,13 +117,13 @@
       <Filter>src\win32</Filter>
     </ClCompile>
     <ClCompile Include="precomp.cpp" />
-    <ClCompile Include="Extern\sqlite3-amalgamation\src\sqlite3\sqlite3.c">
+    <ClCompile Include="src\win32\d2dwindow.cpp" />
+    <ClCompile Include="src\win32\mainwindow.cpp" />
+    <ClCompile Include="src\win32\gridview.cpp" />
+    <ClCompile Include="src\win32\historyview.cpp" />
+    <ClCompile Include="src\win32\themeselectionview.cpp" />
+    <ClCompile Include="extern\sqlite3\src\sqlite3\sqlite3.c">
       <Filter>src\win32</Filter>
     </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="src\win32\theme.toml">
-      <Filter>src\win32</Filter>
-    </None>
   </ItemGroup>
 </Project>
