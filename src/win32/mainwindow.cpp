@@ -233,7 +233,7 @@ bool ui::MainWindow::Create(HINSTANCE hInst, int nCmdShow)
     if (ww <= 0) ww = 860;
     if (wh <= 0) wh = 620;
 
-    if (!CreateD2DWindow(L"EnvironWin32Host", L"environ", wx, wy, ww, wh,
+    if (!CreateD2DWindow(L"EnvironWin32Host", L"environ " ENVIRON_VERSION_STRING, wx, wy, ww, wh,
                          m_settings.window.maximized.get() ? SW_MAXIMIZE : m_nCmdShow))
     {
         ReleaseGraphics();
@@ -925,7 +925,8 @@ void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
     const theme::ColorScheme& s{m_theme.Current()};
     m_rt->Clear(s.windowBg);
 
-    DrawCaption(s, sz.width, L"environ", kBurgerW, m_elevated ? L"  \x2014  Administrator" : nullptr);
+    DrawCaption(s, sz.width, L"environ " ENVIRON_VERSION_STRING, kBurgerW,
+                m_elevated ? L"  \x2014  Administrator" : nullptr);
 
     // Burger button (painted over caption area)
     {

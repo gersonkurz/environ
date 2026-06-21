@@ -12,6 +12,7 @@
 #define SQLITE_DEFAULT_CACHE_SIZE -65536    // 64MB page cache
 
 #include "targetver.h"
+#include "version.h"
 #define NOMINMAX
 #include <toml++/toml.hpp>
 
