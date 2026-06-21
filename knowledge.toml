@@ -106,15 +106,33 @@ CUDA_HOME = "NVIDIA CUDA Toolkit home (alias for CUDA_PATH)"
 _NT_SYMBOL_PATH = "Search path for Windows debugging symbols (WinDbg, VS Debugger)"
 _NT_SOURCE_PATH = "Search path for source files during debugging"
 
-# Classification overrides — force a variable to be treated as a semicolon-separated
-# path-list (segment-by-segment editing) or as a plain scalar, regardless of the
-# content-based heuristic. Names are case-insensitive. Add your own under [classification]
-# in %LOCALAPPDATA%\environ\knowledge.toml to override these without editing this file.
+# Classification — extra knowledge about variables, on two independent axes. Names are
+# case-insensitive. Add your own under [classification] in
+# %LOCALAPPDATA%\environ\knowledge.toml to override these without editing this file.
+#
+#   path_like / scalar  — force a variable to be treated as a semicolon-separated path-list
+#                         (segment-by-segment editing) or a plain scalar, overriding the
+#                         content-based heuristic.
+#   folder / file       — what the value (or each path segment) points at, driving the
+#                         browse affordance: a directory picker vs a file picker.
 #
 # [classification]
-# path_like = ["MYTOOL_PATH", "PLUGINS_DIR"]   # treat as a list even with 0-1 entries
-# scalar    = ["SOME_SEMICOLON_SCALAR"]         # never split, even if it looks path-like
+# path_like = ["MYTOOL_PATH"]   # treat as a list even with 0-1 entries
+# scalar    = ["SOME_SCALAR"]   # never split, even if it looks path-like
+# folder    = ["MY_WORKDIR"]    # value is a directory -> folder picker
+# file      = ["MY_CONFIG"]     # value is a file -> file picker
 [classification]
-# Always a directory list, even when it currently holds a single entry.
+# PSModulePath is always a directory list, even when it currently holds a single entry.
 path_like = ["PSModulePath"]
 scalar = []
+folder = [
+    "DriverData", "SystemRoot", "windir", "TEMP", "TMP", "USERPROFILE",
+    "LOCALAPPDATA", "APPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)",
+    "CommonProgramFiles", "PUBLIC", "OneDrive", "OneDriveCommercial", "OneDriveConsumer",
+    "GOPATH", "GOROOT", "JAVA_HOME", "DOTNET_ROOT", "CARGO_HOME", "RUSTUP_HOME",
+    "VIRTUAL_ENV", "CONDA_PREFIX", "QT_PATH", "ANDROID_HOME", "ANDROID_SDK_ROOT",
+    "VCINSTALLDIR", "ChocolateyInstall", "ChocolateyToolsLocation", "SCOOP",
+    "DOCKER_CERT_PATH", "NUGET_PACKAGES", "AZURE_CONFIG_DIR", "CLOUDSDK_ROOT_DIR",
+    "WIX", "NSIS_HOME", "CUDA_PATH", "CUDA_HOME",
+]
+file = ["ComSpec", "GIT_SSH", "GOOGLE_APPLICATION_CREDENTIALS"]

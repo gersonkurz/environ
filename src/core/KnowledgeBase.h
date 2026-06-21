@@ -13,6 +13,10 @@ class KnowledgeBase {
 public:
     enum class ClassHint { None, ForcePath, ForceScalar };
 
+    // What a variable's value (or, for a path-list, each segment) points at. Drives the
+    // browse affordance: a directory picker vs a file picker. None = no hint.
+    enum class PathRole { None, Folder, File };
+
     // Load and MERGE a TOML file into the current contents (later loads win per key),
     // so a shipped file can be layered under a user override. Returns false on parse error.
     bool load(std::string const& path);
@@ -24,10 +28,16 @@ public:
     // Classification override for a variable name, or None if unlisted (case-insensitive).
     ClassHint classify_override(std::wstring const& variable_name) const;
 
+    // Whether the variable's value points at a folder or a file, or None if unknown
+    // (case-insensitive). Folder and File are mutually exclusive.
+    PathRole path_role(std::wstring const& variable_name) const;
+
 private:
     std::unordered_map<std::wstring, std::wstring> m_descriptions;
     std::unordered_set<std::wstring> m_force_path;   // lowercased names
     std::unordered_set<std::wstring> m_force_scalar; // lowercased names
+    std::unordered_set<std::wstring> m_folders;      // lowercased names
+    std::unordered_set<std::wstring> m_files;        // lowercased names
 };
 
 } // namespace Environ::core

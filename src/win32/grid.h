@@ -180,6 +180,7 @@ namespace ui
         D2D1_RECT_F m_bounds{};
         float m_rowH{30.0f};
         float m_headerH{32.0f};
+        float m_zoom{1.0f};        // scales row/header heights and the name-column width
         float m_scrollbarW{10.0f};
         float m_scrollY{0.0f};
         int m_hover{-1};

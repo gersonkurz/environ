@@ -46,10 +46,13 @@ bool KnowledgeBase::load(std::string const& path) {
             };
             ingest(classification["path_like"], m_force_path, m_force_scalar);
             ingest(classification["scalar"], m_force_scalar, m_force_path);
+            ingest(classification["folder"], m_folders, m_files);
+            ingest(classification["file"], m_files, m_folders);
         }
 
-        spdlog::info("Knowledge from {}: {} descriptions, {} path / {} scalar overrides",
-            path, m_descriptions.size(), m_force_path.size(), m_force_scalar.size());
+        spdlog::info("Knowledge from {}: {} descriptions, {} path / {} scalar, {} folder / {} file",
+            path, m_descriptions.size(), m_force_path.size(), m_force_scalar.size(),
+            m_folders.size(), m_files.size());
         return true;
     } catch (const toml::parse_error& err) {
         spdlog::error("Failed to parse knowledge file {}: {}", path, err.what());
@@ -63,6 +66,14 @@ KnowledgeBase::ClassHint KnowledgeBase::classify_override(std::wstring const& va
     if (m_force_path.contains(lower)) return ClassHint::ForcePath;
     if (m_force_scalar.contains(lower)) return ClassHint::ForceScalar;
     return ClassHint::None;
+}
+
+KnowledgeBase::PathRole KnowledgeBase::path_role(std::wstring const& variable_name) const {
+    std::wstring lower{variable_name};
+    std::ranges::transform(lower, lower.begin(), ::towlower);
+    if (m_folders.contains(lower)) return PathRole::Folder;
+    if (m_files.contains(lower)) return PathRole::File;
+    return PathRole::None;
 }
 
 std::wstring KnowledgeBase::describe(std::wstring const& variable_name) const {

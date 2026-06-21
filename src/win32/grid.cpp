@@ -576,6 +576,7 @@ namespace ui
 
     void Grid::SetZoom(float zoom)
     {
+        m_zoom = zoom;
         m_rowH = 30.0f * zoom;
         m_headerH = 32.0f * zoom;
         ClampScroll();
@@ -626,7 +627,9 @@ namespace ui
 
     float Grid::NameColWidth() const
     {
-        return std::min(260.0f, (m_bounds.right - m_bounds.left) * 0.34f);
+        // Scale the cap with zoom so larger fonts still fit; the proportional bound keeps
+        // the name column from eating the whole row on narrow windows.
+        return std::min(260.0f * m_zoom, (m_bounds.right - m_bounds.left) * 0.45f);
     }
 
     D2D1_RECT_F Grid::ValueCellRect(int row) const
