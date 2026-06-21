@@ -161,10 +161,34 @@ void ui::D2DWindow::DrawString(const std::wstring& s, IDWriteTextFormat* fmt,
 // --- Caption ---
 
 void ui::D2DWindow::DrawCaption(const theme::ColorScheme& s, float widthDip,
-                                 const wchar_t* title, float titleLeftInset)
+                                 const wchar_t* title, float titleLeftInset,
+                                 const wchar_t* subtitle)
 {
-    DrawString(title, m_fmtCaption.get(),
-             D2D1::RectF(14.0f + titleLeftInset, 0.0f, widthDip - 3 * kBtnW - 8.0f, kCaptionH), s.headerText);
+    const D2D1_RECT_F titleBox{
+        D2D1::RectF(14.0f + titleLeftInset, 0.0f, widthDip - 3 * kBtnW - 8.0f, kCaptionH)};
+
+    std::wstring text{title};
+    const UINT32 boldLen{static_cast<UINT32>(text.size())};
+    if (subtitle) text += subtitle;
+
+    // Use a text layout so the subtitle range can carry a lighter weight than the title.
+    IDWriteTextLayout* layout{nullptr};
+    if (m_dw && SUCCEEDED(m_dw->CreateTextLayout(
+            text.c_str(), static_cast<UINT32>(text.size()), m_fmtCaption.get(),
+            titleBox.right - titleBox.left, titleBox.bottom - titleBox.top, &layout)) && layout)
+    {
+        if (subtitle)
+            layout->SetFontWeight(DWRITE_FONT_WEIGHT_NORMAL,
+                                  DWRITE_TEXT_RANGE{boldLen, static_cast<UINT32>(text.size()) - boldLen});
+        m_brush->SetColor(s.headerText);
+        m_rt->DrawTextLayout(D2D1::Point2F(titleBox.left, titleBox.top), layout, m_brush,
+                             D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        layout->Release();
+    }
+    else
+    {
+        DrawString(text, m_fmtCaption.get(), titleBox, s.headerText);
+    }
 
     const CaptionButtons b = CaptionButtonRects(widthDip);
     const bool zoomed = IsZoomed(m_hwnd) != 0;

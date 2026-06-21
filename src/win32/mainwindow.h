@@ -79,8 +79,21 @@ private:
     void PaintMsgBox(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
 
     // Nav panel
+    enum class NavAction { Themes, History, Save, RunAsAdmin };
+    struct NavItem { const wchar_t* label; const wchar_t* hint; NavAction action; };
+    std::vector<NavItem> NavItems() const; // dynamic: RunAsAdmin only appears when unelevated
     int  NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const;
     void HandleNavClick(int item);
+
+    // Elevation: relaunch the exe via the "runas" verb (UAC) so HKLM becomes editable.
+    // RelaunchAsAdmin confirms first if there are unsaved changes; DoRelaunchAsAdmin
+    // performs the actual relaunch (and is the confirm-dialog callback).
+    void RelaunchAsAdmin();
+    void DoRelaunchAsAdmin();
+
+    // Title-bar "Run as Administrator" button, left of the caption buttons. Empty rect
+    // when elevated (button hidden).
+    D2D1_RECT_F AdminButtonRect(float widthDip) const;
 
     // View plumbing
     ViewContext MakeContext() const;
@@ -110,6 +123,7 @@ private:
     Environ::core::SnapshotStore m_snapshots;
     Environ::core::AppSettings   m_settings;
     Environ::core::KnowledgeBase m_knowledge;
+    bool   m_elevated{false}; // cached Environ::core::is_elevated() at startup
     float  m_zoom{1.0f};
     float  m_fontScale{1.0f};
     std::wstring m_uiFontFamily{L"Segoe UI Variable Text"}; // backs ViewContext::uiFontFamily
@@ -124,6 +138,7 @@ private:
     bool m_navOpen{false};
     int  m_navHover{-1};
     bool m_navBurgerHover{false};
+    bool m_adminBtnHover{false};
 
     // Message box modal
     MsgBoxState m_msgBox;

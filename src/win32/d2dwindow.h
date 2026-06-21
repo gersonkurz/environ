@@ -62,9 +62,11 @@ protected:
     void DrawString(const std::wstring& s, IDWriteTextFormat* fmt,
                     const D2D1_RECT_F& box, const D2D1_COLOR_F& c);
 
-    // Caption
+    // Caption. If `subtitle` is non-null it is appended after `title` in normal weight
+    // (the title stays at the format's bolder weight), so the two read as distinct.
     void DrawCaption(const theme::ColorScheme& s, float widthDip,
-                     const wchar_t* title, float titleLeftInset = 0.0f);
+                     const wchar_t* title, float titleLeftInset = 0.0f,
+                     const wchar_t* subtitle = nullptr);
     void ApplyDarkTitleBar(bool dark);
 
     // Caption interaction helpers (for subclass message handlers)

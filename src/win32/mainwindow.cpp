@@ -67,6 +67,14 @@ namespace
     constexpr float kNavWidth{220.0f};
     constexpr float kNavItemH{36.0f};
     constexpr wchar_t kGlyphBurger{0xE700}; // Segoe Fluent Icons "GlobalNavigationButton"
+    constexpr wchar_t kGlyphShield{0xE730}; // Segoe Fluent Icons "Shield" (UAC)
+    constexpr float kCapBtnW{46.0f};        // caption min/max/close width (mirrors d2dwindow)
+    constexpr float kAdminBtnW{200.0f};     // "Run as Administrator" title-bar button width
+
+    bool InRect(const D2D1_RECT_F& r, float x, float y)
+    {
+        return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+    }
 
     // Context menu item IDs (used by WM_COMMAND for owner-draw menu dispatching).
     constexpr UINT kMenuCopy{1001};
@@ -98,6 +106,7 @@ bool ui::MainWindow::InitSettings()
         spdlog::error("Settings load failed: {}", e.what());
         return false;
     }
+    m_elevated = Environ::core::is_elevated();
     m_zoom = std::clamp(static_cast<float>(m_settings.appearance.zoom.get()) / 100.0f, 0.5f, 2.0f);
 
     m_theme.LoadFromDirectory(ThemesDirBesideExe());
@@ -268,7 +277,7 @@ void ui::MainWindow::ApplyHistoryRestore()
     auto data{m_historyView.TakeRestoreData()};
     m_grid.SetDataForRestore(data.curUser, data.curMachine,
                              data.snapUser, data.snapMachine,
-                             Environ::core::is_elevated());
+                             m_elevated);
     m_gridView.SetCounts(data.snapUser.size(), data.snapMachine.size());
 }
 
@@ -298,7 +307,7 @@ void ui::MainWindow::ApplyThemeChange()
 
 void ui::MainWindow::LoadData()
 {
-    m_gridView.LoadData(Environ::core::is_elevated());
+    m_gridView.LoadData(m_elevated);
 }
 
 void ui::MainWindow::SaveChanges()
@@ -429,7 +438,7 @@ void ui::MainWindow::DoApply()
     const ApplyResult result{apply_document_changes(
         m_grid.OriginalVars(Scope::User), m_reviewCurUser,
         m_grid.OriginalVars(Scope::Machine), m_reviewCurMachine,
-        Environ::core::is_elevated())};
+        m_elevated)};
 
     if (result.succeeded())
     {
@@ -631,26 +640,42 @@ void ui::MainWindow::PaintMsgBox(const theme::ColorScheme& s, const D2D1_SIZE_F&
 
 // --- Nav panel ---
 
+std::vector<ui::MainWindow::NavItem> ui::MainWindow::NavItems() const
+{
+    std::vector<NavItem> items{
+        {L"Themes",  L"",       NavAction::Themes},
+        {L"History", L"Ctrl+H", NavAction::History},
+        {L"Save",    L"Ctrl+S", NavAction::Save},
+    };
+    // Offer elevation only when it would change anything.
+    if (!m_elevated)
+        items.push_back({L"Run as Administrator", L"", NavAction::RunAsAdmin});
+    return items;
+}
+
 int ui::MainWindow::NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const
 {
     if (!m_navOpen) return -1;
     if (x < 0.0f || x >= kNavWidth || y < 48.0f || y >= sz.height - 32.0f)
         return -1;
 
-    // Items start at panel top (48) + 8 padding.
-    // Items 0,1,2 (Themes/History/Save): 36 DIP each
+    // Items start at panel top (48) + 8 padding; each is kNavItemH tall.
     const float startY{48.0f + 8.0f};
-    if (y >= startY && y < startY + 3 * kNavItemH)
-        return static_cast<int>((y - startY) / kNavItemH); // 0,1,2
+    const int count{static_cast<int>(NavItems().size())};
+    if (y >= startY && y < startY + static_cast<float>(count) * kNavItemH)
+        return static_cast<int>((y - startY) / kNavItemH);
     return -1;
 }
 
 void ui::MainWindow::HandleNavClick(int item)
 {
+    const auto items{NavItems()};
+    if (item < 0 || item >= static_cast<int>(items.size())) return;
+
     const auto ctx{MakeContext()};
-    switch (item)
+    switch (items[static_cast<size_t>(item)].action)
     {
-    case 0: // Themes
+    case NavAction::Themes:
         if (m_activeView == &m_themeView)
             SwitchToView(&m_gridView);
         else
@@ -659,7 +684,7 @@ void ui::MainWindow::HandleNavClick(int item)
             SwitchToView(&m_themeView);
         }
         break;
-    case 1: // History
+    case NavAction::History:
         if (m_activeView == &m_historyView)
             SwitchToView(&m_gridView);
         else
@@ -668,9 +693,59 @@ void ui::MainWindow::HandleNavClick(int item)
             SwitchToView(&m_historyView);
         }
         break;
-    case 2: // Save
+    case NavAction::Save:
         SaveChanges();
         break;
+    case NavAction::RunAsAdmin:
+        RelaunchAsAdmin();
+        break;
+    }
+}
+
+D2D1_RECT_F ui::MainWindow::AdminButtonRect(float widthDip) const
+{
+    if (m_elevated) return D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f); // hidden when elevated
+    const float right{widthDip - 3.0f * kCapBtnW};              // sit left of min/max/close
+    return D2D1::RectF(right - kAdminBtnW, 0.0f, right, kBurgerH);
+}
+
+void ui::MainWindow::RelaunchAsAdmin()
+{
+    // Relaunching starts a fresh process, so pending edits (including editable user vars)
+    // would be lost. Confirm first if the document is dirty.
+    if (m_gridView.HasChanges())
+    {
+        ShowMsgBox(L"environ \x2014 Run as Administrator",
+                   L"Restarting as administrator will discard your unsaved changes.\n\n"
+                   L"Continue?",
+                   [this]() { DoRelaunchAsAdmin(); });
+        return;
+    }
+    DoRelaunchAsAdmin();
+}
+
+void ui::MainWindow::DoRelaunchAsAdmin()
+{
+    wchar_t exePath[MAX_PATH]{};
+    if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
+    {
+        ShowMsgBox(L"environ", L"Could not determine the executable path to relaunch.");
+        return;
+    }
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.lpVerb = L"runas"; // request elevation via UAC
+    sei.lpFile = exePath;
+    sei.nShow  = SW_SHOWNORMAL;
+    if (ShellExecuteExW(&sei))
+    {
+        DestroyWindow(m_hwnd); // elevated instance is starting; close this one
+    }
+    else if (GetLastError() != ERROR_CANCELLED) // user declining UAC is not an error
+    {
+        spdlog::warn("Relaunch as administrator failed: {}", GetLastError());
+        ShowMsgBox(L"environ", L"Could not restart as administrator.");
     }
 }
 
@@ -690,12 +765,11 @@ void ui::MainWindow::PaintNav(const theme::ColorScheme& s, const D2D1_SIZE_F& sz
     const float padLeft{16.0f};
     const float padRight{kNavWidth - 12.0f};
 
-    const wchar_t* labels[]{L"Themes", L"History", L"Save"};
-    const wchar_t* hints[]{L"", L"Ctrl+H", L"Ctrl+S"};
-
-    for (int i{0}; i < 3; ++i)
+    const auto items{NavItems()};
+    for (int i{0}; i < static_cast<int>(items.size()); ++i)
     {
-        const float iy{startY + i * kNavItemH};
+        const NavItem& it{items[static_cast<size_t>(i)]};
+        const float iy{startY + static_cast<float>(i) * kNavItemH};
         const D2D1_RECT_F itemRect{D2D1::RectF(0.0f, iy, kNavWidth, iy + kNavItemH)};
         const bool hovered{m_navHover == i};
 
@@ -705,12 +779,17 @@ void ui::MainWindow::PaintNav(const theme::ColorScheme& s, const D2D1_SIZE_F& sz
             m_rt->FillRectangle(itemRect, m_brush);
         }
 
-        const D2D1_COLOR_F labelColor{hovered ? s.rowHover.text : s.headerText};
-        DrawString(labels[i], m_fmtValue.get(),
-                   D2D1::RectF(padLeft, iy, padRight - 60.0f, iy + kNavItemH), labelColor);
+        // Items without a keyboard hint get the full label width (e.g. "Run as Administrator").
+        const bool hasHint{it.hint[0] != L'\0'};
+        const float labelRight{hasHint ? padRight - 60.0f : padRight};
 
-        DrawString(hints[i], m_fmtValue.get(),
-                   D2D1::RectF(padRight - 60.0f, iy, padRight, iy + kNavItemH), s.headerSubtext);
+        const D2D1_COLOR_F labelColor{hovered ? s.rowHover.text : s.headerText};
+        DrawString(it.label, m_fmtValue.get(),
+                   D2D1::RectF(padLeft, iy, labelRight, iy + kNavItemH), labelColor);
+
+        if (hasHint)
+            DrawString(it.hint, m_fmtValue.get(),
+                       D2D1::RectF(padRight - 60.0f, iy, padRight, iy + kNavItemH), s.headerSubtext);
     }
 }
 
@@ -719,7 +798,7 @@ void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
     const theme::ColorScheme& s{m_theme.Current()};
     m_rt->Clear(s.windowBg);
 
-    DrawCaption(s, sz.width, L"environ", kBurgerW);
+    DrawCaption(s, sz.width, L"environ", kBurgerW, m_elevated ? L"  \x2014  Administrator" : nullptr);
 
     // Burger button (painted over caption area)
     {
@@ -732,6 +811,23 @@ void ui::MainWindow::OnPaint(const D2D1_SIZE_F& sz)
         m_brush->SetColor(s.headerText);
         m_rt->DrawTextW(&kGlyphBurger, 1, m_fmtGlyph.get(), burgerRect, m_brush,
                         D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
+    // "Run as Administrator" button (shown only when unelevated), left of caption buttons.
+    if (!m_elevated)
+    {
+        const D2D1_RECT_F r{AdminButtonRect(sz.width)};
+        if (m_adminBtnHover)
+        {
+            m_brush->SetColor(s.rowHover.fill);
+            m_rt->FillRectangle(r, m_brush);
+        }
+        const D2D1_COLOR_F fg{m_adminBtnHover ? s.rowHover.text : s.headerText};
+        m_brush->SetColor(fg);
+        const D2D1_RECT_F glyphRect{D2D1::RectF(r.left + 10.0f, r.top, r.left + 34.0f, r.bottom)};
+        m_rt->DrawTextW(&kGlyphShield, 1, m_fmtGlyph.get(), glyphRect, m_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        DrawString(L"Run as Administrator", m_fmtValue.get(),
+                   D2D1::RectF(r.left + 36.0f, r.top, r.right - 8.0f, r.bottom), fg);
     }
 
     // Nav panel (below caption, above footer)
@@ -889,7 +985,7 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         }
     }
 
-    // Burger button must return HTCLIENT so it's clickable, not draggable.
+    // Burger and admin buttons must return HTCLIENT so they're clickable, not draggable.
     if (msg == WM_NCHITTEST)
     {
         POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
@@ -897,6 +993,10 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         const float scale{DipScale()};
         const float xDip{pt.x / scale}, yDip{pt.y / scale};
         if (xDip >= 0.0f && xDip < kBurgerW && yDip >= 0.0f && yDip < kBurgerH)
+            return HTCLIENT;
+        RECT rc{};
+        GetClientRect(m_hwnd, &rc);
+        if (InRect(AdminButtonRect(rc.right / scale), xDip, yDip))
             return HTCLIENT;
         return D2DWindow::HandleMessage(msg, wp, lp);
     }
@@ -979,6 +1079,10 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         bool need{false};
         if (burgerHover != m_navBurgerHover) { m_navBurgerHover = burgerHover; need = true; }
 
+        // Admin button hover
+        const bool adminHover{InRect(AdminButtonRect(wDip), xDip, yDip)};
+        if (adminHover != m_adminBtnHover) { m_adminBtnHover = adminHover; need = true; }
+
         // Nav item hover
         if (m_navOpen && m_rt)
         {
@@ -995,6 +1099,7 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
     {
         bool need{ResetCaptionTracking()};
         if (m_navBurgerHover) { m_navBurgerHover = false; need = true; }
+        if (m_adminBtnHover) { m_adminBtnHover = false; need = true; }
         if (m_navHover != -1) { m_navHover = -1; need = true; }
         need |= m_activeView->OnMouseLeave();
         Repaint(need);
@@ -1015,6 +1120,14 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             m_navHover = -1;
             m_eatNextDblClk = true;
             InvalidateRect(m_hwnd, nullptr, FALSE);
+            return 0;
+        }
+
+        // "Run as Administrator" title-bar button
+        if (InRect(AdminButtonRect(rc.right / scale), xDip, yDip))
+        {
+            m_eatNextDblClk = true;
+            RelaunchAsAdmin();
             return 0;
         }
 
