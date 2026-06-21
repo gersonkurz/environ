@@ -1,5 +1,6 @@
 #include "precomp.h"
 #include "EnvStore.h"
+#include "KnowledgeBase.h"
 
 
 namespace Environ::core {
@@ -110,7 +111,7 @@ EnvVariableKind classify_variable(std::wstring_view value, std::vector<std::wstr
     return EnvVariableKind::Scalar;
 }
 
-std::vector<EnvVariable> read_variables(Scope scope) {
+std::vector<EnvVariable> read_variables(Scope scope, const KnowledgeBase* kb) {
     std::vector<EnvVariable> result;
 
     pnq::regis3::key reg{registry_path(scope)};
@@ -132,6 +133,24 @@ std::vector<EnvVariable> read_variables(Scope scope) {
         auto value{pnq::unicode::to_utf16(val.get_string())};
         std::vector<std::wstring> segments;
         auto kind{classify_variable(value, segments)};
+
+        // A knowledge-base classification override wins over the content heuristic.
+        if (kb) {
+            switch (kb->classify_override(name)) {
+            case KnowledgeBase::ClassHint::ForcePath:
+                if (kind != EnvVariableKind::PathList) {
+                    kind = EnvVariableKind::PathList;
+                    segments = split_segments(value);
+                }
+                break;
+            case KnowledgeBase::ClassHint::ForceScalar:
+                kind = EnvVariableKind::Scalar;
+                segments.clear();
+                break;
+            case KnowledgeBase::ClassHint::None:
+                break;
+            }
+        }
 
         result.push_back(EnvVariable{
             .name{std::move(name)},

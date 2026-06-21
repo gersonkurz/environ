@@ -4,6 +4,7 @@
 
 #include "gridview.h"
 #include "EnvStore.h"
+#include "KnowledgeBase.h"
 
 namespace
 {
@@ -29,8 +30,9 @@ namespace
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-ui::GridView::GridView(Grid& grid, theme::ThemeSet& theme)
-    : m_grid{grid}, m_theme{theme}
+ui::GridView::GridView(Grid& grid, theme::ThemeSet& theme,
+                       const Environ::core::KnowledgeBase& knowledge)
+    : m_grid{grid}, m_theme{theme}, m_knowledge{knowledge}
 {
 }
 
@@ -68,9 +70,11 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
 
     // Search bar sits at the top of the bounds (same height as the grid header row).
     const float searchH{32.0f * ctx.zoom};
-    // Grid occupies bounds minus search bar at top and 24 DIP detail strip at bottom.
-    const float stripReserve{24.0f};
-    const float detailH{20.0f};
+    // Grid occupies bounds minus search bar at top and the detail strip at bottom. The
+    // strip must scale with the detail font (zoom * fontScale) or descenders get clipped.
+    const float uiScale{ctx.zoom * ctx.fontScale};
+    const float detailH{22.0f * uiScale};
+    const float stripReserve{detailH + 6.0f * uiScale};
     const D2D1_RECT_F gridBounds{D2D1::RectF(bounds.left, bounds.top + searchH,
                                               bounds.right, bounds.bottom - stripReserve)};
 
@@ -111,6 +115,18 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
         else if (detail->expandedPath != detail->displayPath)
         {
             text = L"\x2192 " + detail->expandedPath;
+        }
+
+        // Nothing path-specific to show -> fall back to the variable's description, if known.
+        // Colored with the accent so it reads as distinct from path/expansion details.
+        if (text.empty())
+        {
+            const std::wstring desc{m_knowledge.describe(m_grid.SelectedVariableName())};
+            if (!desc.empty())
+            {
+                text = L"\x2139 " + desc; // U+2139 information source
+                color = s.accent;
+            }
         }
 
         if (!text.empty())
@@ -240,8 +256,8 @@ void ui::GridView::LoadData(bool elevated)
 {
     using namespace Environ::core;
     m_elevated = elevated;
-    std::vector<EnvVariable> userVars{read_variables(Scope::User)};
-    std::vector<EnvVariable> machineVars{read_variables(Scope::Machine)};
+    std::vector<EnvVariable> userVars{read_variables(Scope::User, &m_knowledge)};
+    std::vector<EnvVariable> machineVars{read_variables(Scope::Machine, &m_knowledge)};
     expand_and_validate(userVars);
     expand_and_validate(machineVars);
     detect_duplicates(userVars, machineVars);

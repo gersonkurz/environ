@@ -6,6 +6,8 @@
 
 namespace Environ::core {
 
+class KnowledgeBase; // classification overrides; see read_variables
+
 enum class Scope { User, Machine };
 enum class EnvVariableKind { Scalar, PathList };
 
@@ -30,7 +32,9 @@ struct EnvVariable {
 // User  = HKCU\Environment
 // Machine = HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment
 // Returns sorted by name (case-insensitive).
-std::vector<EnvVariable> read_variables(Scope scope);
+// If `kb` is non-null, its classification overrides win over the content heuristic
+// (a variable forced to PathList/Scalar regardless of how its value looks).
+std::vector<EnvVariable> read_variables(Scope scope, const KnowledgeBase* kb = nullptr);
 
 // Expand environment variable references and validate path segments.
 void expand_and_validate(std::vector<EnvVariable>& variables);

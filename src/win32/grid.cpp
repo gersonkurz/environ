@@ -301,6 +301,17 @@ namespace ui
         return d;
     }
 
+    std::wstring Grid::SelectedVariableName() const
+    {
+        if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size()))
+            return {};
+        const Row& r{m_rows[static_cast<size_t>(m_selected)]};
+        const auto& orig{(r.scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig};
+        if (r.varIndex < 0 || r.varIndex >= static_cast<int>(orig.size()))
+            return {};
+        return orig[static_cast<size_t>(r.varIndex)].name;
+    }
+
     const std::vector<Environ::core::EnvVariable>& Grid::OriginalVars(Environ::core::Scope scope) const
     {
         return (scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig;

@@ -9,6 +9,7 @@
 #include "EnvStore.h"
 #include "EnvWriter.h"
 #include "SnapshotStore.h"
+#include "KnowledgeBase.h"
 
 #include <functional>
 
@@ -108,12 +109,13 @@ private:
     Grid                         m_grid;
     Environ::core::SnapshotStore m_snapshots;
     Environ::core::AppSettings   m_settings;
+    Environ::core::KnowledgeBase m_knowledge;
     float  m_zoom{1.0f};
     float  m_fontScale{1.0f};
     std::wstring m_uiFontFamily{L"Segoe UI Variable Text"}; // backs ViewContext::uiFontFamily
 
     // View layer
-    GridView            m_gridView{m_grid, m_theme};
+    GridView            m_gridView{m_grid, m_theme, m_knowledge};
     HistoryView         m_historyView{m_snapshots};
     ThemeSelectionView  m_themeView{m_theme};
     View*               m_activeView{&m_gridView};

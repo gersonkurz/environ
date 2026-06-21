@@ -37,14 +37,28 @@ namespace
         return RGB(static_cast<BYTE>(c.r * 255.0f), static_cast<BYTE>(c.g * 255.0f), static_cast<BYTE>(c.b * 255.0f));
     }
 
-    std::wstring ThemesDirBesideExe()
+    std::wstring ExeDir()
     {
         wchar_t path[MAX_PATH]{};
         const DWORD n{GetModuleFileNameW(nullptr, path, MAX_PATH)};
         std::wstring dir{path, n};
         const size_t slash{dir.find_last_of(L"\\/")};
         if (slash != std::wstring::npos) dir.resize(slash);
-        return dir + L"\\themes";
+        return dir;
+    }
+
+    std::wstring ThemesDirBesideExe() { return ExeDir() + L"\\themes"; }
+
+    // Knowledge base: a shipped knowledge.toml beside the exe, layered under an optional
+    // user override at %LOCALAPPDATA%\environ\knowledge.toml (user entries win).
+    std::wstring ShippedKnowledgeFile() { return ExeDir() + L"\\knowledge.toml"; }
+
+    std::wstring UserKnowledgeFile()
+    {
+        wchar_t buf[MAX_PATH]{};
+        const DWORD n{GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH)};
+        if (n == 0 || n >= MAX_PATH) return {};
+        return std::wstring{buf, n} + L"\\environ\\knowledge.toml";
     }
 
     // Nav panel constants.
@@ -91,6 +105,15 @@ bool ui::MainWindow::InitSettings()
         const auto& savedTheme{m_settings.appearance.theme.get()};
         if (!savedTheme.empty()) m_theme.SelectByName(savedTheme);
     }
+
+    // Variable knowledge: shipped file first, user override layered on top.
+    const auto loadKnowledge = [this](const std::wstring& path) {
+        if (!path.empty() && std::filesystem::exists(path))
+            m_knowledge.load(pnq::unicode::to_utf8(path));
+    };
+    loadKnowledge(ShippedKnowledgeFile());
+    loadKnowledge(UserKnowledgeFile());
+
     return true;
 }
 
@@ -375,8 +398,8 @@ void ui::MainWindow::ApplyReviewed()
     // Re-check at the actual write point -- the panel may have been open a while, and the
     // registry could have changed underneath us since load.
     const bool externalChange{
-        !compute_diff(m_grid.OriginalVars(Scope::User), read_variables(Scope::User)).empty() ||
-        !compute_diff(m_grid.OriginalVars(Scope::Machine), read_variables(Scope::Machine)).empty()};
+        !compute_diff(m_grid.OriginalVars(Scope::User), read_variables(Scope::User, &m_knowledge)).empty() ||
+        !compute_diff(m_grid.OriginalVars(Scope::Machine), read_variables(Scope::Machine, &m_knowledge)).empty()};
     if (externalChange)
     {
         ShowMsgBox(L"environ \x2014 External change detected",
@@ -394,8 +417,8 @@ void ui::MainWindow::DoApply()
 
     // Snapshot the current registry state before overwriting it.
     {
-        auto snapUser{read_variables(Scope::User)};
-        auto snapMachine{read_variables(Scope::Machine)};
+        auto snapUser{read_variables(Scope::User, &m_knowledge)};
+        auto snapMachine{read_variables(Scope::Machine, &m_knowledge)};
         auto allChanges{m_reviewUser};
         allChanges.insert(allChanges.end(), m_reviewMachine.begin(), m_reviewMachine.end());
         auto label{pnq::unicode::to_utf8(summarize_changes(allChanges))};

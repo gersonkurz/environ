@@ -86,6 +86,10 @@ namespace ui
         };
         std::optional<SelectionDetail> GetSelectionDetail() const;
 
+        // Name of the variable owning the current selection (empty if none). Used to look
+        // up a knowledge-base description for the detail strip.
+        std::wstring SelectedVariableName() const;
+
         // Right-click: select the row under the cursor (like OnLButtonDown but without
         // scrollbar-thumb drag logic). Returns true if selection changed.
         bool OnRButtonDown(float x, float y, bool shift, bool ctrl);

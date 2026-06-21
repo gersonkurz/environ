@@ -11,7 +11,7 @@ namespace ui {
 class GridView final : public View
 {
 public:
-    GridView(Grid& grid, theme::ThemeSet& theme);
+    GridView(Grid& grid, theme::ThemeSet& theme, const Environ::core::KnowledgeBase& knowledge);
     ~GridView();
 
     // View overrides
@@ -80,6 +80,7 @@ private:
 
     Grid&             m_grid;
     theme::ThemeSet&  m_theme;
+    const Environ::core::KnowledgeBase& m_knowledge;
 
     // Inline editor (HWND is a child of MainWindow, managed here)
     HWND   m_edit{nullptr};
