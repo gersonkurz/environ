@@ -19,6 +19,10 @@
   <!-- License -->
   <set name="LICENSE_URL" value="https://github.com/gersonkurz/environ/blob/main/LICENSE"/>
 
+  <!-- Offer a "Launch environ" button on the success page. [InstallFolder] is computed
+       by the bundle template from INSTALLDIR ([ProgramFiles6432Folder]\environ). -->
+  <set name="LAUNCH_TARGET" value="[InstallFolder]\environ.exe"/>
+
   <!-- Combine the x64 and ARM64 MSIs; filenames match each per-arch BUILD_TARGET. -->
   <bundle>
     <msi source_64bit="environ {{PRODUCT_VERSION}} x64.msi"
