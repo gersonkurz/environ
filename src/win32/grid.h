@@ -23,6 +23,7 @@ namespace ui
         IDWriteTextFormat* name;   // variable name (semibold)
         IDWriteTextFormat* value;  // value / segment path (regular)
         IDWriteTextFormat* header; // column header
+        IDWriteFactory*    factory{nullptr}; // for measuring value widths (h-scroll extent)
     };
 
     class Grid
@@ -44,6 +45,7 @@ namespace ui
         bool OnLButtonDown(float x, float y, bool shift, bool ctrl);
         bool OnLButtonUp();
         bool OnWheel(int delta);
+        bool OnHWheel(int delta); // horizontal value-column scroll
         bool OnKey(int vk);
 
         // Inline editing — the host owns the EDIT control; the grid owns the target cell
@@ -166,9 +168,16 @@ namespace ui
             float maxScroll;
             bool hasScrollbar;
             D2D1_RECT_F thumb;
+            // Horizontal scroll of the value column (name column stays frozen).
+            float valueLeft{0.0f};
+            float valueRight{0.0f};
+            float maxScrollX{0.0f};
+            bool  hasHScroll{false};
+            D2D1_RECT_F hThumb{};
         };
 
         Layout Compute() const;
+        void MeasureContentWidth(const GridFonts& fonts); // sets m_contentW
         void ClearAndSelectFocus();
         float NameColWidth() const;
         D2D1_RECT_F ValueCellRect(int row) const;
@@ -195,6 +204,9 @@ namespace ui
         float m_zoom{1.0f};        // scales row/header heights and the name-column width
         float m_scrollbarW{10.0f};
         float m_scrollY{0.0f};
+        float m_scrollX{0.0f};       // horizontal value-column offset
+        float m_contentW{0.0f};      // widest value text (DIP), measured on demand
+        bool  m_needMeasure{true};   // remeasure m_contentW on next paint
         int m_hover{-1};
         int m_selected{-1};
         std::set<int> m_selection;  // highlighted rows (always includes m_selected when non-empty)
@@ -202,6 +214,8 @@ namespace ui
         bool m_editingName{false}; // true = editing the name cell, false = the value cell
         bool m_draggingThumb{false};
         float m_dragGrabOffset{0.0f};
+        bool m_draggingHThumb{false};
+        float m_hDragGrabOffset{0.0f};
 
         // Filter state
         std::wstring     m_filterText;          // lowercased, for comparison

@@ -32,6 +32,7 @@ struct ViewContext
 
     const wchar_t* uiFontFamily; // UI text family, for GDI controls (inline editor, search box)
     float fontScale;             // persisted font-size multiplier; distinct from transient zoom
+    IDWriteFactory* dwrite;      // for measuring text (horizontal scroll extent)
 };
 
 class View
@@ -56,6 +57,7 @@ public:
     virtual bool OnRButtonDown(const ViewContext& /*ctx*/, float /*x*/, float /*y*/,
                                bool /*shift*/, bool /*ctrl*/) { return false; }
     virtual bool OnWheel(const ViewContext& /*ctx*/, int /*delta*/) { return false; }
+    virtual bool OnHWheel(const ViewContext& /*ctx*/, int /*delta*/) { return false; } // horizontal
     virtual bool OnKey(const ViewContext& /*ctx*/, int /*vk*/) { return false; }
     virtual bool OnSysKey(const ViewContext& /*ctx*/, int /*vk*/, LPARAM /*lp*/) { return false; }
     virtual bool OnContextMenu(const ViewContext& /*ctx*/, int /*screenX*/, int /*screenY*/) { return false; }

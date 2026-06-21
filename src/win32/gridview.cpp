@@ -157,7 +157,7 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
         PositionSearchEdit(ctx, bounds);
     }
 
-    m_grid.Paint(ctx.rt, ctx.brush, GridFonts{ctx.fmtName, ctx.fmtValue, ctx.fmtHeader}, s, gridBounds);
+    m_grid.Paint(ctx.rt, ctx.brush, GridFonts{ctx.fmtName, ctx.fmtValue, ctx.fmtHeader, ctx.dwrite}, s, gridBounds);
 
     // Detail strip: expanded path / validity / duplicate info for the selected row.
     if (const auto detail{m_grid.GetSelectionDetail()})
@@ -256,6 +256,12 @@ bool ui::GridView::OnWheel(const ViewContext& /*ctx*/, int delta)
 {
     if (m_grid.IsEditing()) EndEdit(true);
     return m_grid.OnWheel(delta);
+}
+
+bool ui::GridView::OnHWheel(const ViewContext& /*ctx*/, int delta)
+{
+    if (m_grid.IsEditing()) EndEdit(true);
+    return m_grid.OnHWheel(delta);
 }
 
 bool ui::GridView::OnKey(const ViewContext& ctx, int vk)

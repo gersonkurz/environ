@@ -51,8 +51,6 @@ just clean             # wipe build dirs
   path-list/folder/file classification, layered shipped + user override.
 - **Phase 7 — Elevation (done).** "Run as Administrator" relaunch (hamburger nav +
   title-bar button) for `HKLM` editing; machine vars read-only until then.
-- **Phase 8 — Polish.** Search/filter and the folder/file browse picker are done.
-  Remaining:
-  - **TOML export/import** — wire `EnvExport` into the host.
-  - **Horizontal scrolling** for long values at high zoom (lower priority).
+- **Phase 8 — Polish (done).** Search/filter, the folder/file browse picker, TOML
+  export/import, and horizontal scrolling of long values are all in.
 

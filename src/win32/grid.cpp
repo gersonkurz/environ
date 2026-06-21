@@ -37,6 +37,8 @@ namespace ui
         m_machineStruct.assign(machineVars.size(), false);
         m_rows.clear();
         m_scrollY = 0.0f;
+        m_scrollX = 0.0f;
+        m_needMeasure = true;
         m_hover = -1;
         m_selected = -1;
         m_selection.clear();
@@ -113,6 +115,8 @@ namespace ui
         m_machineOrig = currentMachine;
         m_rows.clear();
         m_scrollY = 0.0f;
+        m_scrollX = 0.0f;
+        m_needMeasure = true;
         m_hover = -1;
         m_selected = -1;
         m_selection.clear();
@@ -326,6 +330,7 @@ namespace ui
         r.col2 = text;
         r.invalid = false;   // stale until recomputed at save
         r.duplicate = false;
+        m_needMeasure = true;
         return true;
     }
 
@@ -461,6 +466,7 @@ namespace ui
 
     void Grid::RebuildFiltered()
     {
+        m_needMeasure = true; // visible set changed -> content width may differ
         if (m_filterText.empty())
         {
             m_filtered.clear();
@@ -607,6 +613,7 @@ namespace ui
         m_zoom = zoom;
         m_rowH = 30.0f * zoom;
         m_headerH = 32.0f * zoom;
+        m_needMeasure = true; // value font scaled -> widths change
         ClampScroll();
     }
 
@@ -628,6 +635,23 @@ namespace ui
             lay.thumb = D2D1::RectF(lay.data.right - m_scrollbarW + 2.0f, thumbTop,
                                     lay.data.right - 2.0f, thumbTop + thumbH);
         }
+
+        // Horizontal value-column geometry (name column stays frozen).
+        const float rightEdge{lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f)};
+        lay.valueLeft = lay.data.left + kPad + NameColWidth();
+        lay.valueRight = rightEdge - kPad;
+        const float valueViewW{std::max(0.0f, lay.valueRight - lay.valueLeft)};
+        lay.maxScrollX = std::max(0.0f, m_contentW - valueViewW);
+        lay.hasHScroll = lay.maxScrollX > 0.5f;
+        if (lay.hasHScroll)
+        {
+            constexpr float hbarH{8.0f};
+            const float thumbW{std::max(28.0f, valueViewW * (valueViewW / m_contentW))};
+            const float fracX{(lay.maxScrollX > 0.0f) ? (m_scrollX / lay.maxScrollX) : 0.0f};
+            const float thumbLeft{lay.valueLeft + fracX * (valueViewW - thumbW)};
+            lay.hThumb = D2D1::RectF(thumbLeft, lay.data.bottom - hbarH,
+                                     thumbLeft + thumbW, lay.data.bottom - 1.0f);
+        }
         return lay;
     }
 
@@ -645,6 +669,29 @@ namespace ui
     {
         const Layout lay{Compute()};
         m_scrollY = std::clamp(m_scrollY, 0.0f, lay.maxScroll);
+        m_scrollX = std::clamp(m_scrollX, 0.0f, lay.maxScrollX);
+    }
+
+    void Grid::MeasureContentWidth(const GridFonts& fonts)
+    {
+        m_contentW = 0.0f;
+        if (!fonts.factory || !fonts.value) return;
+        for (int fi{0}; fi < FilteredCount(); ++fi)
+        {
+            const int i{FilteredToActual(fi)};
+            if (i < 0 || i >= static_cast<int>(m_rows.size())) continue;
+            const std::wstring& text{m_rows[static_cast<size_t>(i)].col2};
+            if (text.empty()) continue;
+            IDWriteTextLayout* layout{nullptr};
+            if (SUCCEEDED(fonts.factory->CreateTextLayout(text.c_str(),
+                    static_cast<UINT32>(text.size()), fonts.value, 1.0e6f, m_rowH, &layout)) && layout)
+            {
+                DWRITE_TEXT_METRICS tm{};
+                if (SUCCEEDED(layout->GetMetrics(&tm)))
+                    m_contentW = std::max(m_contentW, tm.width);
+                layout->Release();
+            }
+        }
     }
 
     void Grid::ClearAndSelectFocus()
@@ -718,6 +765,7 @@ namespace ui
             r.duplicate = false;
         }
         m_editing = -1;
+        m_needMeasure = true;
     }
 
     void Grid::CancelEdit()
@@ -962,10 +1010,21 @@ namespace ui
                      const D2D1_RECT_F& bounds)
     {
         m_bounds = bounds;
+        if (m_needMeasure) { MeasureContentWidth(fonts); m_needMeasure = false; }
         ClampScroll();
         const Layout lay{Compute()};
 
         const float nameCol{NameColWidth()};
+
+        // Draws value text within the value column, offset by the horizontal scroll. The
+        // clip keeps it from bleeding into the (frozen) name column on the left.
+        const auto drawValue = [&](const std::wstring& text, float top, const D2D1_COLOR_F& color) {
+            rt->PushAxisAlignedClip(D2D1::RectF(lay.valueLeft, top, lay.valueRight, top + m_rowH),
+                                    D2D1_ANTIALIAS_MODE_ALIASED);
+            DrawString(rt, brush, text, fonts.value,
+                       D2D1::RectF(lay.valueLeft - m_scrollX, top, lay.valueRight, top + m_rowH), color);
+            rt->PopAxisAlignedClip();
+        };
 
         // Column header band.
         brush->SetColor(s.header.fill);
@@ -1054,16 +1113,13 @@ namespace ui
                 const std::wstring& name{promoted != m_filteredPromoted.end() ? promoted->second : r.col1};
                 DrawString(rt, brush, name, fonts.name,
                          D2D1::RectF(rowRect.left + kPad, y, rowRect.left + nameCol, y + m_rowH), nameColor);
-                DrawString(rt, brush, r.col2, fonts.value,
-                         D2D1::RectF(rowRect.left + kPad + nameCol, y, rowRect.right - kPad, y + m_rowH),
-                         valueColor);
+                drawValue(r.col2, y, valueColor);
             }
             else
             {
                 // Path segments align under the VALUE column — the variable's contents
                 // laid out across multiple lines, not indented from the name.
-                DrawString(rt, brush, r.col2, fonts.value,
-                         D2D1::RectF(rowRect.left + kPad + nameCol, y, rowRect.right - kPad, y + m_rowH), valueColor);
+                drawValue(r.col2, y, valueColor);
             }
         }
 
@@ -1076,6 +1132,13 @@ namespace ui
             brush->SetColor(thumb);
             rt->FillRoundedRectangle(D2D1::RoundedRect(lay.thumb, 4.0f, 4.0f), brush);
         }
+        if (lay.hasHScroll)
+        {
+            D2D1_COLOR_F thumb = s.headerSubtext;
+            thumb.a = m_draggingHThumb ? 0.85f : 0.5f;
+            brush->SetColor(thumb);
+            rt->FillRoundedRectangle(D2D1::RoundedRect(lay.hThumb, 4.0f, 4.0f), brush);
+        }
     }
 
     bool Grid::OnMouseMove(float x, float y)
@@ -1087,6 +1150,15 @@ namespace ui
             const float travel = lay.viewH - thumbH;
             const float newTop = y - m_dragGrabOffset - lay.data.top;
             m_scrollY = (travel > 0.0f) ? (newTop / travel) * lay.maxScroll : 0.0f;
+            ClampScroll();
+            return true;
+        }
+        if (m_draggingHThumb && lay.hasHScroll)
+        {
+            const float thumbW = lay.hThumb.right - lay.hThumb.left;
+            const float travel = (lay.valueRight - lay.valueLeft) - thumbW;
+            const float newLeft = x - m_hDragGrabOffset - lay.valueLeft;
+            m_scrollX = (travel > 0.0f) ? (newLeft / travel) * lay.maxScrollX : 0.0f;
             ClampScroll();
             return true;
         }
@@ -1177,6 +1249,12 @@ namespace ui
             m_dragGrabOffset = y - lay.thumb.top;
             return true; // thumb darkens while grabbed
         }
+        if (lay.hasHScroll && Contains(lay.hThumb, x, y))
+        {
+            m_draggingHThumb = true;
+            m_hDragGrabOffset = x - lay.hThumb.left;
+            return true;
+        }
         const int r = RowAtPoint(lay, x, y);
         if (r < 0) return false;
 
@@ -1220,13 +1298,23 @@ namespace ui
 
     bool Grid::OnLButtonUp()
     {
-        if (m_draggingThumb) { m_draggingThumb = false; return true; } // thumb lightens on release
-        return false;
+        bool changed{false};
+        if (m_draggingThumb)  { m_draggingThumb = false;  changed = true; } // lightens on release
+        if (m_draggingHThumb) { m_draggingHThumb = false; changed = true; }
+        return changed;
     }
 
     bool Grid::OnWheel(int delta)
     {
         m_scrollY -= (static_cast<float>(delta) / WHEEL_DELTA) * 3.0f * m_rowH;
+        ClampScroll();
+        return true;
+    }
+
+    bool Grid::OnHWheel(int delta)
+    {
+        if (Compute().maxScrollX <= 0.0f) return false; // nothing to scroll
+        m_scrollX -= (static_cast<float>(delta) / WHEEL_DELTA) * 48.0f;
         ClampScroll();
         return true;
     }

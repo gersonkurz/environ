@@ -30,6 +30,7 @@ public:
     bool OnRButtonDown(const ViewContext& ctx, float x, float y,
                        bool shift, bool ctrl) override;
     bool OnWheel(const ViewContext& ctx, int delta) override;
+    bool OnHWheel(const ViewContext& ctx, int delta) override;
     bool OnKey(const ViewContext& ctx, int vk) override;
     bool OnSysKey(const ViewContext& ctx, int vk, LPARAM lp) override;
     bool OnContextMenu(const ViewContext& ctx, int screenX, int screenY) override;

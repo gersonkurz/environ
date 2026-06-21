@@ -302,6 +302,7 @@ ui::ViewContext ui::MainWindow::MakeContext() const
         m_fmtGlyph.get(),
         m_uiFontFamily.c_str(),
         m_fontScale,
+        m_dw,
     };
 }
 
@@ -1335,7 +1336,15 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(m_hwnd, nullptr, FALSE);
             return 0;
         }
+        if (GetKeyState(VK_SHIFT) & 0x8000) // Shift+wheel scrolls horizontally
+        {
+            Repaint(m_activeView->OnHWheel(ctx, GET_WHEEL_DELTA_WPARAM(wp)));
+            return 0;
+        }
         Repaint(m_activeView->OnWheel(ctx, GET_WHEEL_DELTA_WPARAM(wp)));
+        return 0;
+    case WM_MOUSEHWHEEL: // tilt wheel: positive = right; OnHWheel treats positive as left
+        Repaint(m_activeView->OnHWheel(ctx, -GET_WHEEL_DELTA_WPARAM(wp)));
         return 0;
     case WM_MEASUREITEM:
     {
