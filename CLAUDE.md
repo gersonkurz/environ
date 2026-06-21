@@ -66,8 +66,11 @@ Or directly: `msbuild environ.vcxproj /p:Configuration=Debug /p:Platform=x64 /m`
 - `EnvWriter` — `compute_diff`, `apply_changes`, broadcasts `WM_SETTINGCHANGE`
   (direct Win32 `RegSetValueExW`/`RegDeleteValueW`, not pnq::regis3).
 - `SnapshotStore` — SQLite history at `%LOCALAPPDATA%\environ\environ.db`.
-- `AppSettings` — theme, persisted window placement.
-- `EnvExport`, `KnowledgeBase` — present but not yet wired into the host; verify before use.
+- `AppSettings` — theme, window placement, typography (`UiFont`/`MonoFont`/`FontScale`), zoom.
+- `EnvExport` — round-trippable TOML export/import (`export_toml`/`import_toml`/`merge_variables`).
+- `KnowledgeBase` — per-variable descriptions + path-list/folder/file classification from
+  `knowledge.toml` (shipped beside the exe, layered under a `%LOCALAPPDATA%\environ\knowledge.toml`
+  user override). Drives the detail-strip description and the folder/file browse picker.
 
 ### Boundaries & known facts
 - **Two-layer rule:** no business logic in `src/win32/`; no Win32/UI/WinRT types in
@@ -95,9 +98,9 @@ Or directly: `msbuild environ.vcxproj /p:Configuration=Debug /p:Platform=x64 /m`
 - Compiles clean at `/W4 /WX`, zero warnings. A suppressed warning is explained in a comment
   at the suppression site, in the same commit.
 - Follows the two-layer rule and the theme-table discipline.
-- Verified in light, dark, and blue schemes; correct under per-monitor DPI scaling.
+- Verified across light and dark Base16 schemes; correct under per-monitor DPI scaling.
 - Doesn't crash when run unelevated and the user touches a machine variable.
-- Stays within the current phase's scope (`docs/PHASE-*.md`).
+- Stays within scope; `docs/ROADMAP.md` holds direction (Phases 1–8 are complete).
 
 ## If the build breaks, check in this order
 1. Is `msbuild` on PATH? (run from a VS Developer Command Prompt or use `vsdevcmd`.)
