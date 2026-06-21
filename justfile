@@ -23,8 +23,8 @@ _msbuild configuration platform:
 # Build Debug (native arch)
 build: (_msbuild "Debug" platform)
 
-# Build Release (native arch)
-release: (_msbuild "Release" platform)
+# Build Release (native arch) — compile only, no installer
+build-release: (_msbuild "Release" platform)
 
 # Build all (Debug+Release, x64+ARM64)
 build-all: (_msbuild "Debug" "x64") (_msbuild "Release" "x64") (_msbuild "Debug" "ARM64") (_msbuild "Release" "ARM64")
@@ -35,8 +35,8 @@ run: build
 
 # --- Packaging (MSIS 3.x) ---
 
-# Build both MSIs and the cross-arch bundle executable.
-release-setup: package-all bundle
+# Build the release installers: both MSIs plus the cross-arch bundle executable.
+release: package-all bundle
 
 # Build the MSI for the native arch.
 package: (_stage platform "Release") (_stage_symbols platform "Release") (_package "environ-" + platform_suffix + ".msis")
