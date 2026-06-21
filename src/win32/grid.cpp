@@ -93,6 +93,7 @@ namespace ui
 
         addGroup(userVars, Scope::User, false);
         addGroup(machineVars, Scope::Machine, !elevated);
+        RebuildFiltered();
     }
 
     void Grid::SetDataForRestore(
@@ -249,6 +250,7 @@ namespace ui
                 }
             }
         }
+        RebuildFiltered();
     }
 
     bool Grid::HasChanges() const
@@ -406,6 +408,161 @@ namespace ui
         return result;
     }
 
+    void Grid::SetFilter(const std::wstring& text)
+    {
+        m_filterText.resize(text.size());
+        std::ranges::transform(text, m_filterText.begin(), ::towlower);
+        RebuildFiltered();
+    }
+
+    int Grid::FilteredRowCount() const
+    {
+        return FilteredCount();
+    }
+
+    void Grid::RebuildFiltered()
+    {
+        if (m_filterText.empty())
+        {
+            m_filtered.clear();
+            m_filteredPromoted.clear();
+            m_filterActive = false;
+            return;
+        }
+
+        m_filtered.clear();
+        m_filteredPromoted.clear();
+        m_filterActive = true;
+
+        const auto matchesFilter = [this](const std::wstring& s) {
+            if (s.empty()) return false;
+            std::wstring lower(s.size(), L'\0');
+            std::ranges::transform(s, lower.begin(), ::towlower);
+            return lower.find(m_filterText) != std::wstring::npos;
+        };
+
+        // Walk rows grouped by variable (contiguous runs sharing scope + varIndex).
+        for (size_t i{0}; i < m_rows.size();)
+        {
+            const auto scope{m_rows[i].scope};
+            const int vi{m_rows[i].varIndex};
+
+            // Collect the contiguous group.
+            const size_t groupStart{i};
+            size_t groupEnd{i};
+            while (groupEnd < m_rows.size() && m_rows[groupEnd].scope == scope && m_rows[groupEnd].varIndex == vi)
+                ++groupEnd;
+
+            // Always include all rows of new variables (varIndex == -1).
+            if (vi == -1)
+            {
+                for (size_t j{groupStart}; j < groupEnd; ++j)
+                    m_filtered.push_back(static_cast<int>(j));
+                i = groupEnd;
+                continue;
+            }
+
+            // Check if the variable name matches.
+            bool nameMatch{false};
+            for (size_t j{groupStart}; j < groupEnd && !nameMatch; ++j)
+            {
+                if (!m_rows[j].col1.empty() && matchesFilter(m_rows[j].col1))
+                    nameMatch = true;
+            }
+
+            if (nameMatch)
+            {
+                // Name matches: include all rows of this variable.
+                for (size_t j{groupStart}; j < groupEnd; ++j)
+                    m_filtered.push_back(static_cast<int>(j));
+            }
+            else
+            {
+                // Name doesn't match: check individual rows for value matches.
+                const size_t varRow{groupStart};
+
+                // Single-row variable (scalar): include if value matches.
+                if (groupEnd - groupStart == 1)
+                {
+                    if (matchesFilter(m_rows[varRow].col2))
+                        m_filtered.push_back(static_cast<int>(varRow));
+                }
+                else
+                {
+                    // Multi-row path-list: collect rows whose col2 matches.
+                    std::vector<int> matchingRows;
+                    for (size_t j{groupStart}; j < groupEnd; ++j)
+                    {
+                        if (matchesFilter(m_rows[j].col2))
+                            matchingRows.push_back(static_cast<int>(j));
+                    }
+                    if (!matchingRows.empty())
+                    {
+                        const int varIdx{static_cast<int>(varRow)};
+                        const bool varRowMatched{matchingRows[0] == varIdx};
+
+                        if (varRowMatched)
+                        {
+                            // First segment matched: Variable row naturally shows name + value.
+                            for (int idx : matchingRows)
+                                m_filtered.push_back(idx);
+                        }
+                        else
+                        {
+                            // First segment didn't match: skip the Variable row, promote
+                            // the first matching segment to display the variable name.
+                            m_filteredPromoted[matchingRows[0]] = m_rows[varRow].col1;
+                            for (int idx : matchingRows)
+                                m_filtered.push_back(idx);
+                        }
+                    }
+                }
+            }
+            i = groupEnd;
+        }
+
+        // If current selection is not in the filtered set, move to first filtered row.
+        if (m_selected >= 0 && ActualToFiltered(m_selected) < 0)
+        {
+            m_selected = m_filtered.empty() ? -1 : m_filtered[0];
+        }
+
+        // Intersect m_selection with filtered set.
+        std::set<int> newSel;
+        for (int idx : m_selection)
+        {
+            if (ActualToFiltered(idx) >= 0) newSel.insert(idx);
+        }
+        m_selection = std::move(newSel);
+        if (m_selected >= 0 && !m_selection.contains(m_selected))
+            m_selection.insert(m_selected);
+
+        m_scrollY = 0.0f;
+        ClampScroll();
+    }
+
+    int Grid::FilteredToActual(int fi) const
+    {
+        if (!m_filterActive) return fi;
+        if (fi < 0 || fi >= static_cast<int>(m_filtered.size())) return -1;
+        return m_filtered[static_cast<size_t>(fi)];
+    }
+
+    int Grid::ActualToFiltered(int actual) const
+    {
+        if (!m_filterActive) return actual;
+        for (int i{0}; i < static_cast<int>(m_filtered.size()); ++i)
+        {
+            if (m_filtered[static_cast<size_t>(i)] == actual) return i;
+        }
+        return -1;
+    }
+
+    int Grid::FilteredCount() const
+    {
+        return m_filterActive ? static_cast<int>(m_filtered.size()) : static_cast<int>(m_rows.size());
+    }
+
     void Grid::SetZoom(float zoom)
     {
         m_rowH = 30.0f * zoom;
@@ -419,7 +576,7 @@ namespace ui
         lay.header = D2D1::RectF(m_bounds.left, m_bounds.top, m_bounds.right, m_bounds.top + m_headerH);
         lay.data = D2D1::RectF(m_bounds.left, m_bounds.top + m_headerH, m_bounds.right, m_bounds.bottom);
         lay.viewH = std::max(0.0f, lay.data.bottom - lay.data.top);
-        lay.contentH = static_cast<float>(m_rows.size()) * m_rowH;
+        lay.contentH = static_cast<float>(FilteredCount()) * m_rowH;
         lay.maxScroll = std::max(0.0f, lay.contentH - lay.viewH);
         lay.hasScrollbar = lay.contentH > lay.viewH + 0.5f;
 
@@ -439,8 +596,9 @@ namespace ui
         const float rightEdge = lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f);
         if (x < lay.data.left || x >= rightEdge || y < lay.data.top || y >= lay.data.bottom)
             return -1;
-        const int idx = static_cast<int>((y - lay.data.top + m_scrollY) / m_rowH);
-        return (idx >= 0 && idx < static_cast<int>(m_rows.size())) ? idx : -1;
+        const int fi = static_cast<int>((y - lay.data.top + m_scrollY) / m_rowH);
+        if (fi < 0 || fi >= FilteredCount()) return -1;
+        return FilteredToActual(fi);
     }
 
     void Grid::ClampScroll()
@@ -464,14 +622,16 @@ namespace ui
     {
         const Layout lay{Compute()};
         const float rightEdge = lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f);
-        const float top = lay.data.top + static_cast<float>(row) * m_rowH - m_scrollY;
+        const int fi{ActualToFiltered(row)};
+        const float top = lay.data.top + static_cast<float>(fi >= 0 ? fi : row) * m_rowH - m_scrollY;
         return D2D1::RectF(lay.data.left + kPad + NameColWidth(), top, rightEdge - kPad, top + m_rowH);
     }
 
     D2D1_RECT_F Grid::NameCellRect(int row) const
     {
         const Layout lay{Compute()};
-        const float top = lay.data.top + static_cast<float>(row) * m_rowH - m_scrollY;
+        const int fi{ActualToFiltered(row)};
+        const float top = lay.data.top + static_cast<float>(fi >= 0 ? fi : row) * m_rowH - m_scrollY;
         return D2D1::RectF(lay.data.left + kPad, top, lay.data.left + NameColWidth(), top + m_rowH);
     }
 
@@ -551,6 +711,7 @@ namespace ui
 
         std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
         if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
+        RebuildFiltered();
         EnsureVisible(m_selected);
         return true;
     }
@@ -586,6 +747,7 @@ namespace ui
         ClearAndSelectFocus();
         std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
         if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
+        RebuildFiltered();
         ClampScroll();
         return true;
     }
@@ -629,6 +791,7 @@ namespace ui
         m_rows.insert(m_rows.begin() + insertAt, std::move(var));
         m_selected = insertAt;
         ClearAndSelectFocus();
+        RebuildFiltered();
         EnsureVisible(m_selected);
         return true;
     }
@@ -666,6 +829,7 @@ namespace ui
         if (m_selected >= static_cast<int>(m_rows.size()))
             m_selected = static_cast<int>(m_rows.size()) - 1;
         ClearAndSelectFocus();
+        RebuildFiltered();
         ClampScroll();
         return true;
     }
@@ -687,6 +851,7 @@ namespace ui
 
         std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
         if (vi >= 0 && vi < static_cast<int>(flags.size())) flags[static_cast<size_t>(vi)] = true;
+        RebuildFiltered();
         EnsureVisible(m_selected);
         return true;
     }
@@ -720,14 +885,17 @@ namespace ui
 
     bool Grid::SelectNextEditable(int dir)
     {
-        const int n{static_cast<int>(m_rows.size())};
-        for (int i{m_selected + dir}; i >= 0 && i < n; i += dir)
+        const int fc{FilteredCount()};
+        int fi{ActualToFiltered(m_selected)};
+        if (fi < 0) fi = (dir > 0) ? -1 : fc;
+        for (int i{fi + dir}; i >= 0 && i < fc; i += dir)
         {
-            if (!m_rows[static_cast<size_t>(i)].readOnly)
+            const int ai{FilteredToActual(i)};
+            if (ai >= 0 && !m_rows[static_cast<size_t>(ai)].readOnly)
             {
-                m_selected = i;
+                m_selected = ai;
                 ClearAndSelectFocus();
-                EnsureVisible(i);
+                EnsureVisible(ai);
                 return true;
             }
         }
@@ -738,7 +906,9 @@ namespace ui
     {
         const float viewH = m_bounds.bottom - m_bounds.top - m_headerH;
         if (viewH <= 0.0f) return;
-        const float top = static_cast<float>(row) * m_rowH;
+        const int fi{ActualToFiltered(row)};
+        if (fi < 0) return; // row hidden by filter
+        const float top = static_cast<float>(fi) * m_rowH;
         const float bottom = top + m_rowH;
         if (top < m_scrollY) m_scrollY = top;
         else if (bottom > m_scrollY + viewH) m_scrollY = bottom - viewH;
@@ -775,10 +945,12 @@ namespace ui
         rt->PushAxisAlignedClip(lay.data, D2D1_ANTIALIAS_MODE_ALIASED);
 
         const float rightEdge{lay.data.right - (lay.hasScrollbar ? m_scrollbarW : 0.0f)};
-        int i{static_cast<int>(m_scrollY / m_rowH)};
-        float y{lay.data.top - (m_scrollY - static_cast<float>(i) * m_rowH)};
-        for (; i < static_cast<int>(m_rows.size()) && y < lay.data.bottom; ++i, y += m_rowH)
+        int fi{static_cast<int>(m_scrollY / m_rowH)};
+        float y{lay.data.top - (m_scrollY - static_cast<float>(fi) * m_rowH)};
+        for (; fi < FilteredCount() && y < lay.data.bottom; ++fi, y += m_rowH)
         {
+            const int i{FilteredToActual(fi)};
+            if (i < 0 || i >= static_cast<int>(m_rows.size())) continue;
             const Row& r{m_rows[static_cast<size_t>(i)]};
             const bool selected = m_selection.contains(i);
             const bool focused = (i == m_selected);
@@ -832,9 +1004,13 @@ namespace ui
                 rt->FillRectangle(D2D1::RectF(rowRect.left, y + 6.0f, rowRect.left + 3.0f, y + m_rowH - 6.0f), brush);
             }
 
-            if (r.kind == Row::Kind::Variable)
+            // Check if this segment row is promoted to show a variable name.
+            const auto promoted{m_filteredPromoted.find(i)};
+
+            if (r.kind == Row::Kind::Variable || promoted != m_filteredPromoted.end())
             {
-                DrawString(rt, brush, r.col1, fonts.name,
+                const std::wstring& name{promoted != m_filteredPromoted.end() ? promoted->second : r.col1};
+                DrawString(rt, brush, name, fonts.name,
                          D2D1::RectF(rowRect.left + kPad, y, rowRect.left + nameCol, y + m_rowH), nameColor);
                 DrawString(rt, brush, r.col2, fonts.value,
                          D2D1::RectF(rowRect.left + kPad + nameCol, y, rowRect.right - kPad, y + m_rowH),
@@ -973,12 +1149,21 @@ namespace ui
         }
         else if (shift)
         {
-            // Range-select from the current focus to the clicked row (inclusive).
+            // Range-select from the current focus to the clicked row (inclusive),
+            // only including rows visible in the filtered set.
             const int anchor{m_selected >= 0 ? m_selected : 0};
-            const int lo{std::min(anchor, r)};
-            const int hi{std::max(anchor, r)};
-            for (int i{lo}; i <= hi; ++i)
-                m_selection.insert(i);
+            const int anchorFi{ActualToFiltered(anchor)};
+            const int rFi{ActualToFiltered(r)};
+            if (anchorFi >= 0 && rFi >= 0)
+            {
+                const int loFi{std::min(anchorFi, rFi)};
+                const int hiFi{std::max(anchorFi, rFi)};
+                for (int fi{loFi}; fi <= hiFi; ++fi)
+                {
+                    const int ai{FilteredToActual(fi)};
+                    if (ai >= 0) m_selection.insert(ai);
+                }
+            }
             m_selected = r;
         }
         else
@@ -1006,26 +1191,28 @@ namespace ui
 
     bool Grid::OnKey(int vk)
     {
-        if (m_rows.empty()) return false;
-        const int n = static_cast<int>(m_rows.size());
+        const int fc{FilteredCount()};
+        if (fc == 0) return false;
         const float viewH = m_bounds.bottom - m_bounds.top - m_headerH;
         const int page = std::max(1, static_cast<int>(viewH / m_rowH));
-        int sel = m_selected;
+
+        // Convert current selection to filtered index for navigation.
+        int fi{ActualToFiltered(m_selected)};
 
         switch (vk)
         {
-        case VK_DOWN:  sel = (sel < 0) ? 0 : std::min(sel + 1, n - 1); break;
-        case VK_UP:    sel = (sel < 0) ? 0 : std::max(sel - 1, 0); break;
-        case VK_NEXT:  sel = (sel < 0) ? 0 : std::min(sel + page, n - 1); break;
-        case VK_PRIOR: sel = (sel < 0) ? 0 : std::max(sel - page, 0); break;
-        case VK_HOME:  sel = 0; break;
-        case VK_END:   sel = n - 1; break;
+        case VK_DOWN:  fi = (fi < 0) ? 0 : std::min(fi + 1, fc - 1); break;
+        case VK_UP:    fi = (fi < 0) ? 0 : std::max(fi - 1, 0); break;
+        case VK_NEXT:  fi = (fi < 0) ? 0 : std::min(fi + page, fc - 1); break;
+        case VK_PRIOR: fi = (fi < 0) ? 0 : std::max(fi - page, 0); break;
+        case VK_HOME:  fi = 0; break;
+        case VK_END:   fi = fc - 1; break;
         default:       return false;
         }
 
-        m_selected = sel;
+        m_selected = FilteredToActual(fi);
         ClearAndSelectFocus();
-        EnsureVisible(sel);
+        EnsureVisible(m_selected);
         return true;
     }
 }

@@ -45,12 +45,20 @@ ui::GridView::~GridView()
 // View overrides
 // ---------------------------------------------------------------------------
 
-void ui::GridView::Activate(const ViewContext& /*ctx*/)
+void ui::GridView::Activate(const ViewContext& ctx)
 {
+    EnsureSearchControl(ctx);
+    if (m_searchEdit) ShowWindow(m_searchEdit, SW_SHOW);
 }
 
 void ui::GridView::Deactivate()
 {
+    if (m_searchEdit)
+    {
+        ShowWindow(m_searchEdit, SW_HIDE);
+        SetWindowTextW(m_searchEdit, L"");
+    }
+    m_grid.SetFilter(L"");
     EndEdit(true);
 }
 
@@ -58,11 +66,30 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
 {
     const theme::ColorScheme& s{*ctx.scheme};
 
-    // Grid occupies bounds minus 24 DIP at the bottom (4 gap + 20 detail strip).
+    // Search bar sits at the top of the bounds (same height as the grid header row).
+    const float searchH{32.0f * ctx.zoom};
+    // Grid occupies bounds minus search bar at top and 24 DIP detail strip at bottom.
     const float stripReserve{24.0f};
     const float detailH{20.0f};
-    const D2D1_RECT_F gridBounds{D2D1::RectF(bounds.left, bounds.top,
+    const D2D1_RECT_F gridBounds{D2D1::RectF(bounds.left, bounds.top + searchH,
                                               bounds.right, bounds.bottom - stripReserve)};
+
+    // Paint search bar background (same as header band).
+    {
+        const D2D1_RECT_F searchBg{D2D1::RectF(bounds.left, bounds.top,
+                                                bounds.right, bounds.top + searchH)};
+        ctx.brush->SetColor(s.header.fill);
+        ctx.rt->FillRectangle(searchBg, ctx.brush);
+        if (s.header.borderWidth > 0.0f)
+        {
+            ctx.brush->SetColor(s.header.border);
+            ctx.rt->DrawLine(D2D1::Point2F(bounds.left, bounds.top + searchH - 0.5f),
+                             D2D1::Point2F(bounds.right, bounds.top + searchH - 0.5f),
+                             ctx.brush, s.header.borderWidth);
+        }
+        PositionSearchEdit(ctx, bounds);
+    }
+
     m_grid.Paint(ctx.rt, ctx.brush, GridFonts{ctx.fmtName, ctx.fmtValue, ctx.fmtHeader}, s, gridBounds);
 
     // Detail strip: expanded path / validity / duplicate info for the selected row.
@@ -177,15 +204,18 @@ bool ui::GridView::OnContextMenu(const ViewContext& ctx, int screenX, int screen
     return false;
 }
 
-void ui::GridView::OnSize(const ViewContext& /*ctx*/)
+void ui::GridView::OnSize(const ViewContext& ctx)
 {
     if (m_grid.IsEditing()) EndEdit(true);
+    InvalidateRect(ctx.hwnd, nullptr, FALSE);
 }
 
 void ui::GridView::OnDpiChanged(const ViewContext& ctx)
 {
     if (m_grid.IsEditing()) EndEdit(true);
     RefreshEditFont(ctx);
+    if (m_searchEdit)
+        SendMessageW(m_searchEdit, WM_SETFONT, reinterpret_cast<WPARAM>(m_editFontName), TRUE);
 }
 
 std::wstring ui::GridView::GetStatusText(const ViewContext& ctx) const
@@ -195,6 +225,8 @@ std::wstring ui::GridView::GetStatusText(const ViewContext& ctx) const
         L"{}   \x2022   {} user, {} machine{}",
         std::wstring(s.name.begin(), s.name.end()), m_userCount, m_machineCount,
         m_elevated ? L"" : L"  (machine read-only)");
+    if (m_grid.HasFilter())
+        footer += std::format(L"   \x2022   {} shown (filtered)", m_grid.FilteredRowCount());
     if (ctx.zoom != 1.0f)
         footer += std::format(L"   \x2022   {}%", static_cast<int>(ctx.zoom * 100));
     return footer;
@@ -380,7 +412,6 @@ void ui::GridView::RefreshEditBrush()
 
 void ui::GridView::RefreshEditFont(const ViewContext& ctx)
 {
-    if (!m_edit) return;
     const float scale{ctx.dipScale};
     const auto px = [scale](float dip) { return static_cast<int>(dip * scale); };
     if (m_editFont) DeleteObject(m_editFont);
@@ -391,6 +422,8 @@ void ui::GridView::RefreshEditFont(const ViewContext& ctx)
     m_editFontName = CreateFontW(-px(14.0f * ctx.zoom), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
+    if (m_searchEdit)
+        SendMessageW(m_searchEdit, WM_SETFONT, reinterpret_cast<WPARAM>(m_editFontName), TRUE);
 }
 
 // ---------------------------------------------------------------------------
@@ -461,4 +494,99 @@ void ui::GridView::CopyToClipboard(const std::wstring& text)
         }
     }
     CloseClipboard();
+}
+
+// ---------------------------------------------------------------------------
+// Search bar
+// ---------------------------------------------------------------------------
+
+void ui::GridView::EnsureSearchControl(const ViewContext& ctx)
+{
+    if (m_searchEdit) return;
+    m_searchEdit = CreateWindowExW(0, L"EDIT", L"",
+                                    WS_CHILD | ES_AUTOHSCROLL,
+                                    0, 0, 0, 0,
+                                    ctx.hwnd, nullptr,
+                                    reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(ctx.hwnd, GWLP_HINSTANCE)),
+                                    nullptr);
+    if (!m_searchEdit)
+    {
+        spdlog::error("search edit control creation failed");
+        return;
+    }
+    // Subclass: Esc clears text, Down/Enter moves focus to grid.
+    struct SearchSub {
+        static LRESULT CALLBACK Proc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR ref)
+        {
+            HWND parent{reinterpret_cast<HWND>(ref)};
+            constexpr UINT WM_APP_SEARCH_CLOSE{WM_APP + 2};
+            constexpr UINT WM_APP_SEARCH_GRID{WM_APP + 3};
+            if (msg == WM_KEYDOWN)
+            {
+                if (wp == VK_ESCAPE) { PostMessageW(parent, WM_APP_SEARCH_CLOSE, 0, 0); return 0; }
+                if (wp == VK_DOWN || wp == VK_RETURN) { PostMessageW(parent, WM_APP_SEARCH_GRID, 0, 0); return 0; }
+            }
+            else if (msg == WM_CHAR && (wp == VK_RETURN || wp == VK_ESCAPE))
+            {
+                return 0; // suppress ding
+            }
+            return DefSubclassProc(h, msg, wp, lp);
+        }
+    };
+    if (!SetWindowSubclass(m_searchEdit, SearchSub::Proc, 2, reinterpret_cast<DWORD_PTR>(ctx.hwnd)))
+    {
+        spdlog::error("SetWindowSubclass for search edit failed");
+        DestroyWindow(m_searchEdit);
+        m_searchEdit = nullptr;
+        return;
+    }
+    RefreshEditFont(ctx);
+    if (m_editFontName)
+        SendMessageW(m_searchEdit, WM_SETFONT, reinterpret_cast<WPARAM>(m_editFontName), TRUE);
+    SendMessageW(m_searchEdit, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                 MAKELPARAM(4, 4));
+}
+
+void ui::GridView::FocusSearch()
+{
+    if (!m_searchEdit) return;
+    if (m_grid.IsEditing()) EndEdit(true);
+    SetFocus(m_searchEdit);
+    SendMessageW(m_searchEdit, EM_SETSEL, 0, -1);
+}
+
+void ui::GridView::ClearSearch(const ViewContext& ctx)
+{
+    if (!m_searchEdit) return;
+    SetWindowTextW(m_searchEdit, L"");
+    m_grid.SetFilter(L"");
+    SetFocus(ctx.hwnd);
+    InvalidateRect(ctx.hwnd, nullptr, FALSE);
+}
+
+void ui::GridView::OnSearchTextChanged(const ViewContext& ctx)
+{
+    if (!m_searchEdit) return;
+    const int len{GetWindowTextLengthW(m_searchEdit)};
+    std::wstring text(static_cast<size_t>(len) + 1, L'\0');
+    const int copied{GetWindowTextW(m_searchEdit, text.data(), len + 1)};
+    text.resize(static_cast<size_t>(copied));
+    m_grid.SetFilter(text);
+    InvalidateRect(ctx.hwnd, nullptr, FALSE);
+}
+
+void ui::GridView::PositionSearchEdit(const ViewContext& ctx, const D2D1_RECT_F& bounds)
+{
+    if (!m_searchEdit) return;
+    const float scale{ctx.dipScale};
+    const auto px = [scale](float dip) { return static_cast<int>(dip * scale); };
+    const float searchH{32.0f * ctx.zoom};
+    const float padX{12.0f};
+    const float padY{4.0f * ctx.zoom};
+
+    MoveWindow(m_searchEdit,
+               px(bounds.left + padX),
+               px(bounds.top + padY),
+               px(bounds.right - bounds.left - 2.0f * padX),
+               px(searchH - 2.0f * padY), FALSE);
 }

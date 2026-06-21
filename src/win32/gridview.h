@@ -54,6 +54,12 @@ public:
     // Data count update (e.g. after snapshot restore)
     void SetCounts(size_t userCount, size_t machineCount) { m_userCount = userCount; m_machineCount = machineCount; }
 
+    // Search bar (always visible when GridView is active)
+    void FocusSearch();
+    void ClearSearch(const ViewContext& ctx);
+    bool IsSearchControl(HWND h) const { return h == m_searchEdit; }
+    void OnSearchTextChanged(const ViewContext& ctx);
+
     // Accessors for MainWindow
     HFONT EditFont() const { return m_editFont; }
     bool  IsEditControl(HWND h) const { return h == m_edit; }
@@ -68,6 +74,10 @@ private:
     // Menu
     void ShowGridContextMenu(const ViewContext& ctx, int screenX, int screenY);
 
+    // Search
+    void EnsureSearchControl(const ViewContext& ctx);
+    void PositionSearchEdit(const ViewContext& ctx, const D2D1_RECT_F& bounds);
+
     Grid&             m_grid;
     theme::ThemeSet&  m_theme;
 
@@ -76,6 +86,9 @@ private:
     HFONT  m_editFont{nullptr};
     HFONT  m_editFontName{nullptr};
     HBRUSH m_editBrush{nullptr};
+
+    // Search bar (always visible, no toggle)
+    HWND   m_searchEdit{nullptr};
 
     // Data counts for footer
     size_t m_userCount{0};

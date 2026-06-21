@@ -10,6 +10,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "theme.h"
@@ -105,6 +106,11 @@ namespace ui
         bool IsEditing() const { return m_editing >= 0; }
         bool IsEditingName() const { return m_editing >= 0 && m_editingName; }
 
+        // Filter support: live-filter visible rows by substring match.
+        void SetFilter(const std::wstring& text);
+        bool HasFilter() const { return m_filterActive; }
+        int  FilteredRowCount() const;
+
         // Adjust row/header heights by zoom factor (1.0 = 100%).
         void SetZoom(float zoom);
 
@@ -155,6 +161,12 @@ namespace ui
         void EnsureVisible(int row);
         void ClampScroll();
 
+        // Filter helpers
+        void RebuildFiltered();
+        int  FilteredToActual(int fi) const;
+        int  ActualToFiltered(int actual) const;
+        int  FilteredCount() const;
+
         std::vector<Row> m_rows;
         std::vector<Environ::core::EnvVariable> m_userOrig;
         std::vector<Environ::core::EnvVariable> m_machineOrig;
@@ -173,5 +185,11 @@ namespace ui
         bool m_editingName{false}; // true = editing the name cell, false = the value cell
         bool m_draggingThumb{false};
         float m_dragGrabOffset{0.0f};
+
+        // Filter state
+        std::wstring     m_filterText;          // lowercased, for comparison
+        std::vector<int> m_filtered;            // filtered-index -> actual-row-index
+        std::unordered_map<int, std::wstring> m_filteredPromoted; // Segment rows that display a variable name
+        bool             m_filterActive{false};
     };
 }

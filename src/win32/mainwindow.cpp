@@ -23,6 +23,10 @@ namespace
     // 2 = commit + move (Tab); lParam (Tab only): 1 = Shift (move up), 0 = move down.
     constexpr UINT WM_APP_EDIT_END{WM_APP + 1};
 
+    // Posted by the search EDIT subclass to close or refocus.
+    constexpr UINT WM_APP_SEARCH_CLOSE{WM_APP + 2};
+    constexpr UINT WM_APP_SEARCH_GRID{WM_APP + 3};
+
     bool Contains(const D2D1_RECT_F& r, float x, float y)
     {
         return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
@@ -142,6 +146,9 @@ bool ui::MainWindow::Create(HINSTANCE hInst, int nCmdShow)
     ApplyTitleBar();
     const int backdrop{DWMSBT_MAINWINDOW};
     DwmSetWindowAttribute(m_hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+
+    // Activate the default view so its child controls (search bar) are created.
+    m_activeView->Activate(MakeContext());
 
     return true;
 }
@@ -880,13 +887,18 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(m_hwnd, nullptr, FALSE);
             return 0;
         }
-        // Grid-only shortcuts: Ctrl+S, Ctrl+C.
+        // Grid-only shortcuts: Ctrl+S, Ctrl+C, Ctrl+F.
         if (m_activeView == &m_gridView)
         {
             if (wp == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) { SaveChanges(); return 0; }
             if (wp == 'C' && (GetKeyState(VK_CONTROL) & 0x8000))
             {
                 m_gridView.CopyToClipboard(m_grid.CopyText());
+                return 0;
+            }
+            if (wp == 'F' && (GetKeyState(VK_CONTROL) & 0x8000))
+            {
+                m_gridView.FocusSearch();
                 return 0;
             }
         }
@@ -1122,7 +1134,8 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         return TRUE;
     }
     case WM_CTLCOLOREDIT:
-        if (m_gridView.IsEditControl(reinterpret_cast<HWND>(lp)))
+        if (m_gridView.IsEditControl(reinterpret_cast<HWND>(lp))
+            || m_gridView.IsSearchControl(reinterpret_cast<HWND>(lp)))
             return m_gridView.OnCtlColorEdit(ctx, wp);
         break;
     case WM_COMMAND:
@@ -1151,6 +1164,11 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
                 return 0;
             }
         }
+        if (HIWORD(wp) == EN_CHANGE && m_gridView.IsSearchControl(reinterpret_cast<HWND>(lp)))
+        {
+            m_gridView.OnSearchTextChanged(ctx);
+            return 0;
+        }
         if (HIWORD(wp) == EN_KILLFOCUS && m_gridView.IsEditControl(reinterpret_cast<HWND>(lp)))
         {
             m_gridView.OnEditEnd(ctx, true, false, false);
@@ -1162,6 +1180,12 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         m_gridView.OnEditEnd(ctx, wp != 0, wp == 2, lp != 0);
         return 0;
     }
+    case WM_APP_SEARCH_CLOSE:
+        m_gridView.ClearSearch(ctx);
+        return 0;
+    case WM_APP_SEARCH_GRID:
+        SetFocus(m_hwnd);
+        return 0;
     }
     return D2DWindow::HandleMessage(msg, wp, lp);
 }
