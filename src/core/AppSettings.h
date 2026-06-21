@@ -42,9 +42,14 @@ struct AppSettings : public Section {
         {
         }
 
-        // "System", "Light", or "Dark"
+        // Base16 scheme name (file stem in themes/, e.g. "nord"); empty = built-in fallback.
         TypedValue<std::string> theme{this, "Theme", "System"};
         TypedValue<int32_t> zoom{this, "Zoom", 100}; // percentage: 50–200
+
+        // Typography (host applies these; glyph/icon font stays fixed in code).
+        TypedValue<std::string> uiFont{this, "UiFont", "Segoe UI Variable Text"};
+        TypedValue<std::string> monoFont{this, "MonoFont", "Consolas"};
+        TypedValue<int32_t> fontScale{this, "FontScale", 100}; // percentage: 75–150
 
     } appearance{this};
 

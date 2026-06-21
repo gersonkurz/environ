@@ -416,12 +416,12 @@ void ui::GridView::RefreshEditFont(const ViewContext& ctx)
     const auto px = [scale](float dip) { return static_cast<int>(dip * scale); };
     if (m_editFont) DeleteObject(m_editFont);
     if (m_editFontName) DeleteObject(m_editFontName);
-    m_editFont = CreateFontW(-px(12.0f * ctx.zoom), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    m_editFont = CreateFontW(-px(12.0f * ctx.zoom * ctx.fontScale), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
-    m_editFontName = CreateFontW(-px(14.0f * ctx.zoom), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                             CLEARTYPE_QUALITY, DEFAULT_PITCH, ctx.uiFontFamily);
+    m_editFontName = CreateFontW(-px(14.0f * ctx.zoom * ctx.fontScale), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                 CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
+                                 CLEARTYPE_QUALITY, DEFAULT_PITCH, ctx.uiFontFamily);
     if (m_searchEdit)
         SendMessageW(m_searchEdit, WM_SETFONT, reinterpret_cast<WPARAM>(m_editFontName), TRUE);
 }

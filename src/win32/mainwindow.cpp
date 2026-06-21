@@ -157,15 +157,23 @@ bool ui::MainWindow::Create(HINSTANCE hInst, int nCmdShow)
 
 bool ui::MainWindow::CreateFonts()
 {
-    const auto z = [this](float size) { return size * m_zoom; };
-    m_fmtCaption = MakeFormat(L"Segoe UI Variable Text", z(13.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
-    m_fmtSub     = MakeFormat(L"Segoe UI Variable Text", z(12.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
-    m_fmtName    = MakeFormat(L"Segoe UI Variable Text", z(14.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
-    m_fmtValue   = MakeFormat(L"Segoe UI Variable Small", z(11.5f), DWRITE_FONT_WEIGHT_NORMAL, true);
-    m_fmtHeader  = MakeFormat(L"Segoe UI Variable Small", z(11.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
+    // Typography comes from [Appearance]; the glyph/icon font is fixed (its codepoints
+    // are Segoe Fluent Icons PUA glyphs). The "Small" optical sibling collapses into the
+    // single configurable UI family. fontScale stacks with the transient zoom.
+    m_fontScale = std::clamp(static_cast<float>(m_settings.appearance.fontScale.get()) / 100.0f, 0.75f, 1.5f);
+    m_uiFontFamily = pnq::unicode::to_utf16(m_settings.appearance.uiFont.get());
+    const std::wstring monoFamily{pnq::unicode::to_utf16(m_settings.appearance.monoFont.get())};
+    const wchar_t* ui{m_uiFontFamily.c_str()};
+
+    const auto z = [this](float size) { return size * m_zoom * m_fontScale; };
+    m_fmtCaption = MakeFormat(ui, z(13.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
+    m_fmtSub     = MakeFormat(ui, z(12.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
+    m_fmtName    = MakeFormat(ui, z(14.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
+    m_fmtValue   = MakeFormat(ui, z(11.5f), DWRITE_FONT_WEIGHT_NORMAL, true);
+    m_fmtHeader  = MakeFormat(ui, z(11.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true);
     m_fmtGlyph   = MakeFormat(L"Segoe Fluent Icons", z(10.0f), DWRITE_FONT_WEIGHT_NORMAL, true, true);
-    m_fmtButton  = MakeFormat(L"Segoe UI Variable Text", z(13.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true, true);
-    m_fmtMono    = MakeFormat(L"Consolas", z(9.5f), DWRITE_FONT_WEIGHT_NORMAL, false);
+    m_fmtButton  = MakeFormat(ui, z(13.0f), DWRITE_FONT_WEIGHT_SEMI_BOLD, true, true);
+    m_fmtMono    = MakeFormat(monoFamily.c_str(), z(9.5f), DWRITE_FONT_WEIGHT_NORMAL, false);
     return m_fmtCaption && m_fmtSub && m_fmtName && m_fmtValue
         && m_fmtHeader && m_fmtGlyph && m_fmtButton && m_fmtMono;
 }
@@ -195,6 +203,8 @@ ui::ViewContext ui::MainWindow::MakeContext() const
         m_fmtButton.get(),
         m_fmtMono.get(),
         m_fmtGlyph.get(),
+        m_uiFontFamily.c_str(),
+        m_fontScale,
     };
 }
 

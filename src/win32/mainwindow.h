@@ -109,6 +109,8 @@ private:
     Environ::core::SnapshotStore m_snapshots;
     Environ::core::AppSettings   m_settings;
     float  m_zoom{1.0f};
+    float  m_fontScale{1.0f};
+    std::wstring m_uiFontFamily{L"Segoe UI Variable Text"}; // backs ViewContext::uiFontFamily
 
     // View layer
     GridView            m_gridView{m_grid, m_theme};

@@ -29,6 +29,9 @@ struct ViewContext
     IDWriteTextFormat* fmtButton;
     IDWriteTextFormat* fmtMono;
     IDWriteTextFormat* fmtGlyph;
+
+    const wchar_t* uiFontFamily; // UI text family, for GDI controls (inline editor, search box)
+    float fontScale;             // persisted font-size multiplier; distinct from transient zoom
 };
 
 class View
