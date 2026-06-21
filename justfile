@@ -73,6 +73,10 @@ _stage_symbols platform configuration: (_msbuild configuration platform)
 _package script:
     @cd setup&& msis /BUILD /STANDALONE {{script}}
 
+# Set the version (X.Y.Z) in version.h and environ.rc's VERSIONINFO.
+version VERSION:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\set-version.ps1 {{VERSION}}
+
 # Clean all output
 clean:
     if exist bin rmdir /s /q bin
