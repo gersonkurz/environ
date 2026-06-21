@@ -760,6 +760,8 @@ std::vector<ui::MainWindow::NavItem> ui::MainWindow::NavItems() const
     // Offer elevation only when it would change anything.
     if (!m_elevated)
         items.push_back({L"Run as Administrator", L"", NavAction::RunAsAdmin});
+    items.push_back({L"About", L"", NavAction::About});
+    items.push_back({L"Exit",  L"", NavAction::Exit});
     return items;
 }
 
@@ -816,6 +818,13 @@ void ui::MainWindow::HandleNavClick(int item)
         break;
     case NavAction::RunAsAdmin:
         RelaunchAsAdmin();
+        break;
+    case NavAction::About:
+        ShellExecuteW(m_hwnd, L"open", L"https://github.com/gersonkurz/environ",
+                      nullptr, nullptr, SW_SHOWNORMAL);
+        break;
+    case NavAction::Exit:
+        PostMessageW(m_hwnd, WM_CLOSE, 0, 0); // same path as the title-bar close button
         break;
     }
 }

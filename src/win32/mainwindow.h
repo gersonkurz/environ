@@ -81,7 +81,7 @@ private:
     void PaintMsgBox(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
 
     // Nav panel
-    enum class NavAction { Themes, History, Save, Export, Import, RunAsAdmin };
+    enum class NavAction { Themes, History, Save, Export, Import, RunAsAdmin, About, Exit };
     struct NavItem { const wchar_t* label; const wchar_t* hint; NavAction action; };
     std::vector<NavItem> NavItems() const; // dynamic: RunAsAdmin only appears when unelevated
     int  NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const;
