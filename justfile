@@ -15,9 +15,16 @@ platform_suffix := if _arch == "ARM64" { "arm64" } else { "x64" }
 default:
     @just --list
 
+# Fail early with a clear message when not run from a VS 2026 Developer shell.
+# A Developer Command Prompt / Developer PowerShell sets VisualStudioVersion and
+# puts msbuild on PATH; without it the build fails cryptically.
+[private]
+_require-devshell:
+    @if not "%VisualStudioVersion%"=="18.0" (echo. & echo ERROR: This needs a Visual Studio 2026 Developer shell. & echo Open "Developer Command Prompt for VS 2026" or "Developer PowerShell for VS 2026", then retry. & echo Expected VisualStudioVersion=18.0 but found "%VisualStudioVersion%". & exit /b 1)
+
 # Run MSBuild for one configuration/platform.
 [private]
-_msbuild configuration platform:
+_msbuild configuration platform: _require-devshell
     msbuild {{project}} /p:Configuration={{configuration}} /p:Platform={{platform}} /m /nologo /v:minimal
 
 # Build Debug (native arch)
