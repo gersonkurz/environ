@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIS Bundle Setup - combines the x64 and ARM64 installers into one .exe that
+  auto-selects the correct architecture for the target system.
+-->
+<setup>
+  <!-- Product identification -->
+  <set name="PRODUCT_NAME" value="environ"/>
+  <set name="PRODUCT_VERSION" value="1.0.0"/>
+  <set name="MANUFACTURER" value="https://github.com/gersonkurz/environ"/>
+  <set name="UPGRADE_CODE" value="{36F9C006-E335-4127-8515-1E42FB574C8B}"/>
+
+  <!-- Output bundle executable -->
+  <set name="BUILD_TARGET" value="setup\environ-{{PRODUCT_VERSION}}.exe"/>
+
+  <!-- Install folder name (under Program Files) -->
+  <set name="INSTALLDIR" value="environ"/>
+
+  <!-- License -->
+  <set name="LICENSE_URL" value="https://github.com/gersonkurz/environ/blob/main/LICENSE"/>
+
+  <!-- Combine the x64 and ARM64 MSIs; filenames match each per-arch BUILD_TARGET. -->
+  <bundle>
+    <msi source_64bit="environ {{PRODUCT_VERSION}} x64.msi"
+         source_arm64="environ {{PRODUCT_VERSION}} ARM64.msi"/>
+  </bundle>
+</setup>

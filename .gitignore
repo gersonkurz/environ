@@ -2,6 +2,7 @@
 build/
 temp/
 bin/
+dist/
 
 # Logs and local artifacts
 *.log

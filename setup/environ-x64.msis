@@ -1,0 +1,33 @@
+<?xml version='1.0' encoding='utf-8'?>
+<setup>
+    <!-- Setup script uses MSIS - see https://github.com/gersonkurz/msis -->
+    <set name="PRODUCT_NAME" value="environ x64"/>
+    <set name="PRODUCT_VERSION" value="1.0.0"/>
+    <set name="LANGUAGE" value="en-us"/>
+    <set name="PLATFORM" value="x64"/>
+    <set name="REPAIR_ENABLED" value="True"/>
+    <set name="REMOVE_ENABLED" value="True"/>
+    <set name="REMOVE_FOLDERS_ON_UNINSTALL" value="True"/>
+    <set name="BUILD_TARGET" value="environ 1.0.0 x64.msi"/>
+    <set name="UPGRADE_CODE" value="87173CE7-CEC5-4304-9237-FC17E5FCF77C"/>
+    <set name="MANUFACTURER" value="https://github.com/gersonkurz/environ"/>
+    <set name="INSTALLDIR" value="environ"/>
+    <set name="ADD_TO_PATH" value="True"/>
+
+    <requires type="vcredist" version="2026"/>
+
+    <feature name="environ" enabled="yes" allowed="no">
+        <files source="..\\dist\\stage\\x64" target="INSTALLDIR"/>
+
+        <feature name="Debug Symbols" enabled="yes" allowed="yes">
+            <files source="..\\dist\\symbols\\x64" target="INSTALLDIR"/>
+        </feature>
+
+        <feature name="Start-Menu Shortcut" enabled="yes" allowed="yes">
+            <shortcut name="environ"
+                    target="STARTMENU"
+                    file="[INSTALLDIR]environ.exe"
+                    description="Edit Windows environment variables"/>
+        </feature>
+    </feature>
+</setup>

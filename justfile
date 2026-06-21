@@ -1,6 +1,6 @@
 # Build automation for environ — Windows environment variable editor
 # Pure Win32 + Direct2D + DirectWrite, C++20, MSVC
-# Requires: just (https://github.com/casey/just), msbuild on PATH
+# Requires: just, msbuild on PATH (VS Developer Command Prompt); MSIS 3.x for packaging.
 
 set windows-shell := ["cmd.exe", "/c"]
 
@@ -9,34 +9,75 @@ project := "environ.vcxproj"
 # Map %PROCESSOR_ARCHITECTURE% to msbuild platform: AMD64 → x64, ARM64 → ARM64
 _arch := env_var_or_default("PROCESSOR_ARCHITECTURE", "AMD64")
 platform := if _arch == "ARM64" { "ARM64" } else { "x64" }
+platform_suffix := if _arch == "ARM64" { "arm64" } else { "x64" }
 
 # Default: show available recipes
 default:
     @just --list
 
+# Run MSBuild for one configuration/platform.
+[private]
+_msbuild configuration platform:
+    msbuild {{project}} /p:Configuration={{configuration}} /p:Platform={{platform}} /m /nologo /v:minimal
+
 # Build Debug (native arch)
-build:
-    msbuild {{project}} /p:Configuration=Debug /p:Platform={{platform}} /m /nologo /v:minimal
+build: (_msbuild "Debug" platform)
 
 # Build Release (native arch)
-release:
-    msbuild {{project}} /p:Configuration=Release /p:Platform={{platform}} /m /nologo /v:minimal
+release: (_msbuild "Release" platform)
 
 # Build all (Debug+Release, x64+ARM64)
-build-all:
-    msbuild {{project}} /p:Configuration=Debug /p:Platform=x64 /m /nologo /v:minimal
-    msbuild {{project}} /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal
-    msbuild {{project}} /p:Configuration=Debug /p:Platform=ARM64 /m /nologo /v:minimal
-    msbuild {{project}} /p:Configuration=Release /p:Platform=ARM64 /m /nologo /v:minimal
+build-all: (_msbuild "Debug" "x64") (_msbuild "Release" "x64") (_msbuild "Debug" "ARM64") (_msbuild "Release" "ARM64")
 
 # Build Debug + launch (native arch)
-run:
-    msbuild {{project}} /p:Configuration=Debug /p:Platform={{platform}} /m /nologo /v:minimal && bin\{{platform}}\Debug\environ.exe
+run: build
+    @bin\{{platform}}\Debug\environ.exe
+
+# --- Packaging (MSIS 3.x) ---
+
+# Build both MSIs and the cross-arch bundle executable.
+release-setup: package-all bundle
+
+# Build the MSI for the native arch.
+package: (_stage platform "Release") (_stage_symbols platform "Release") (_package "environ-" + platform_suffix + ".msis")
+
+# Build the x64 MSI.
+package-x64: (_stage "x64" "Release") (_stage_symbols "x64" "Release") (_package "environ-x64.msis")
+
+# Build the ARM64 MSI.
+package-arm64: (_stage "ARM64" "Release") (_stage_symbols "ARM64" "Release") (_package "environ-arm64.msis")
+
+# Build both per-architecture MSIs.
+package-all: package-x64 package-arm64
+
+# Build the multi-architecture bundle executable (requires both MSIs built first).
+bundle:
+    msis /BUILD setup\setup-bundle.msis
+
+# Stage the Release payload (environ.exe + themes\ + knowledge.toml) for one platform.
+[private]
+_stage platform configuration: (_msbuild configuration platform)
+    @if exist dist\stage\{{platform}} rmdir /s /q dist\stage\{{platform}}
+    @mkdir dist\stage\{{platform}}
+    @robocopy bin\{{platform}}\{{configuration}} dist\stage\{{platform}} /E /XF *.pdb *.exp *.lib *.ilk >nul & if errorlevel 8 exit /b 1
+
+# Stage the Release debug symbols for one platform (optional installer feature).
+[private]
+_stage_symbols platform configuration: (_msbuild configuration platform)
+    @if exist dist\symbols\{{platform}} rmdir /s /q dist\symbols\{{platform}}
+    @mkdir dist\symbols\{{platform}}
+    @copy /Y bin\{{platform}}\{{configuration}}\*.pdb dist\symbols\{{platform}}\ >nul
+
+# Build one MSIS manifest from setup/.
+[private]
+_package script:
+    @cd setup&& msis /BUILD /STANDALONE {{script}}
 
 # Clean all output
 clean:
     if exist bin rmdir /s /q bin
     if exist temp rmdir /s /q temp
+    if exist dist rmdir /s /q dist
 
 # Clean + rebuild
 rebuild:
