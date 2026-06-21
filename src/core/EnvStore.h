@@ -60,6 +60,11 @@ std::wstring apply_segment_edits(std::wstring const& original_value,
 EnvVariableKind classify_variable(std::wstring_view value,
                                    std::vector<std::wstring>& segments);
 
+// Preserve a variable's %VAR% form across a folder/file browse: if `picked` (an absolute
+// path from the picker) expands to the same location as `original`, return `original`
+// unchanged so the %USERPROFILE%-style reference is kept; otherwise return `picked`.
+std::wstring preserve_env_form(std::wstring const& original, std::wstring const& picked);
+
 // Returns true if the current process is running elevated (admin).
 bool is_elevated();
 

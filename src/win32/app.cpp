@@ -49,11 +49,19 @@ int ui::App::Run(HINSTANCE hInst, int nCmdShow)
     if (!InitLogging()) return 1;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    MainWindow wnd;
-    if (!wnd.Create(hInst, nCmdShow))
-        return 1;
+    // STA COM for shell dialogs (IFileOpenDialog) and ShellExecuteEx.
+    const HRESULT comHr{CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)};
+    const bool comInit{SUCCEEDED(comHr)};
 
-    return MessageLoop();
+    int result{1};
+    {
+        MainWindow wnd;
+        if (wnd.Create(hInst, nCmdShow))
+            result = MessageLoop();
+    }
+
+    if (comInit) CoUninitialize();
+    return result;
 }
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)

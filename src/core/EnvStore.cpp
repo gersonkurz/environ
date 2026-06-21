@@ -90,6 +90,42 @@ bool path_exists(std::wstring const& path) {
 
 } // namespace
 
+std::wstring preserve_env_form(std::wstring const& original, std::wstring const& picked) {
+    // For each %VAR% reference in `original`, find the one whose expansion is the longest
+    // path-prefix of `picked`, then re-apply that %VAR% form to picked. This keeps the
+    // %USERPROFILE%-style relationship even when the user browses to a subfolder.
+    std::wstring best_token;
+    size_t best_len{0};
+
+    for (size_t pos{0};;) {
+        const size_t a{original.find(L'%', pos)};
+        if (a == std::wstring::npos) break;
+        const size_t b{original.find(L'%', a + 1)};
+        if (b == std::wstring::npos) break;
+
+        const std::wstring token{original.substr(a, b - a + 1)}; // "%VAR%"
+        std::wstring expanded{expand_env_string(token)};
+        if (expanded == token) { pos = b + 1; continue; } // undefined var: didn't expand
+        while (!expanded.empty() && (expanded.back() == L'\\' || expanded.back() == L'/'))
+            expanded.pop_back();
+
+        // picked must start with expanded at a path boundary (whole match or next char a sep).
+        const bool prefix{expanded.size() <= picked.size() &&
+                          _wcsnicmp(picked.c_str(), expanded.c_str(),
+                                    static_cast<int>(expanded.size())) == 0 &&
+                          (picked.size() == expanded.size() ||
+                           picked[expanded.size()] == L'\\' || picked[expanded.size()] == L'/')};
+        if (prefix && expanded.size() > best_len) {
+            best_len = expanded.size();
+            best_token = token;
+        }
+        pos = b + 1;
+    }
+
+    if (best_token.empty()) return picked;            // no env reference matched
+    return best_token + picked.substr(best_len);      // %VAR% + the remaining tail
+}
+
 EnvVariableKind classify_variable(std::wstring_view value, std::vector<std::wstring>& segments) {
     segments = split_segments(value);
     if (segments.size() <= 1) {

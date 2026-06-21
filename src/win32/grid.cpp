@@ -312,6 +312,34 @@ namespace ui
         return orig[static_cast<size_t>(r.varIndex)].name;
     }
 
+    std::wstring Grid::SelectedValueText() const
+    {
+        if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size()))
+            return {};
+        return m_rows[static_cast<size_t>(m_selected)].col2;
+    }
+
+    bool Grid::SetSelectedValue(const std::wstring& text)
+    {
+        if (!SelectionEditable()) return false;
+        Row& r{m_rows[static_cast<size_t>(m_selected)]};
+        r.col2 = text;
+        r.invalid = false;   // stale until recomputed at save
+        r.duplicate = false;
+        return true;
+    }
+
+    std::optional<D2D1_RECT_F> Grid::SelectedValueCellRect() const
+    {
+        if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size()))
+            return std::nullopt;
+        const Layout lay{Compute()};
+        const D2D1_RECT_F r{ValueCellRect(m_selected)};
+        if (r.bottom <= lay.data.top || r.top >= lay.data.bottom) // scrolled off-screen
+            return std::nullopt;
+        return r;
+    }
+
     const std::vector<Environ::core::EnvVariable>& Grid::OriginalVars(Environ::core::Scope scope) const
     {
         return (scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig;

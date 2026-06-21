@@ -80,6 +80,7 @@ namespace
     constexpr UINT kMenuCopy{1001};
     constexpr UINT kMenuInsert{1002};
     constexpr UINT kMenuRemove{1003};
+    constexpr UINT kMenuBrowse{1004};
 
     // Owner-drawn menu item data -- stored in MENUITEMINFO::dwItemData.
     struct MenuItemData
@@ -1291,6 +1292,9 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             {
             case kMenuCopy:
                 m_gridView.CopyToClipboard(m_grid.CopyText());
+                return 0;
+            case kMenuBrowse:
+                m_gridView.BrowseSelected(ctx);
                 return 0;
             case kMenuInsert:
                 if (m_grid.SelectedIsPathEntry())

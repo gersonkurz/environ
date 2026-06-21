@@ -5,6 +5,7 @@
 
 #include "view.h"
 #include "grid.h"
+#include "KnowledgeBase.h"
 
 namespace ui {
 
@@ -37,6 +38,10 @@ public:
     void OnDpiChanged(const ViewContext& ctx) override;
 
     std::wstring GetStatusText(const ViewContext& ctx) const override;
+
+    // Open a folder/file browse dialog for the selected variable or path segment and
+    // write the chosen path back. No-op if the selection isn't folder/file-classified.
+    void BrowseSelected(const ViewContext& ctx);
 
     // GridView-specific API (called by MainWindow)
     void LoadData(bool elevated);
@@ -77,6 +82,10 @@ private:
     // Search
     void EnsureSearchControl(const ViewContext& ctx);
     void PositionSearchEdit(const ViewContext& ctx, const D2D1_RECT_F& bounds);
+
+    // Browse-picker support
+    Environ::core::KnowledgeBase::PathRole SelectedPathRole() const;
+    std::optional<D2D1_RECT_F> BrowseButtonRect() const; // in-cell button for the selected row
 
     Grid&             m_grid;
     theme::ThemeSet&  m_theme;

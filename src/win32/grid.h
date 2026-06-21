@@ -90,6 +90,18 @@ namespace ui
         // up a knowledge-base description for the detail strip.
         std::wstring SelectedVariableName() const;
 
+        // Selected cell's current value text (col2), empty if no selection. Used to seed
+        // the browse dialog.
+        std::wstring SelectedValueText() const;
+
+        // Write `text` into the selected (editable) cell's value, like a committed edit
+        // but without an edit session. Returns false if the selection isn't editable.
+        bool SetSelectedValue(const std::wstring& text);
+
+        // Value-cell rect of the selection if it is currently on-screen, for placing an
+        // in-cell affordance (browse button). nullopt if no selection or scrolled away.
+        std::optional<D2D1_RECT_F> SelectedValueCellRect() const;
+
         // Right-click: select the row under the cursor (like OnLButtonDown but without
         // scrollbar-thumb drag logic). Returns true if selection changed.
         bool OnRButtonDown(float x, float y, bool shift, bool ctrl);

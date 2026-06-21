@@ -17,6 +17,11 @@ namespace
     constexpr UINT kMenuCopy{1001};
     constexpr UINT kMenuInsert{1002};
     constexpr UINT kMenuRemove{1003};
+    constexpr UINT kMenuBrowse{1004};
+
+    // Segoe Fluent Icons glyphs for the in-cell browse button.
+    constexpr wchar_t kGlyphFolder{0xE8B7}; // "Folder"
+    constexpr wchar_t kGlyphFile{0xE8A5};   // "Document"
 
     // Owner-drawn menu item data -- stored in MENUITEMINFO::dwItemData.
     struct MenuItemData
@@ -24,6 +29,64 @@ namespace
         std::wstring label;
         std::wstring accel;
     };
+
+    bool InRect(const D2D1_RECT_F& r, float x, float y)
+    {
+        return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+    }
+
+    // Modern shell folder/file picker. Returns the chosen filesystem path, or nullopt if
+    // cancelled/failed. `initial` (may contain %VARS%) seeds the starting location.
+    std::optional<std::wstring> BrowseForPath(HWND owner, bool pickFolder, const std::wstring& initial)
+    {
+        IFileOpenDialog* dlg{nullptr};
+        if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                    IID_PPV_ARGS(&dlg))) || !dlg)
+            return std::nullopt;
+
+        DWORD opts{};
+        dlg->GetOptions(&opts);
+        opts |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+        if (pickFolder) opts |= FOS_PICKFOLDERS;
+        dlg->SetOptions(opts);
+
+        // Seed the dialog from the current value (expanded). For a file, seed its folder
+        // and pre-fill the name; for a folder, seed the folder itself.
+        if (!initial.empty())
+        {
+            wchar_t expanded[1024]{};
+            ExpandEnvironmentStringsW(initial.c_str(), expanded, 1024);
+            std::filesystem::path p{expanded};
+            const std::filesystem::path dir{pickFolder ? p : p.parent_path()};
+            IShellItem* item{nullptr};
+            if (!dir.empty() &&
+                SUCCEEDED(SHCreateItemFromParsingName(dir.c_str(), nullptr, IID_PPV_ARGS(&item))) && item)
+            {
+                dlg->SetFolder(item);
+                item->Release();
+            }
+            if (!pickFolder && p.has_filename())
+                dlg->SetFileName(p.filename().c_str());
+        }
+
+        std::optional<std::wstring> result;
+        if (SUCCEEDED(dlg->Show(owner)))
+        {
+            IShellItem* item{nullptr};
+            if (SUCCEEDED(dlg->GetResult(&item)) && item)
+            {
+                PWSTR path{nullptr};
+                if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path)
+                {
+                    result = path;
+                    CoTaskMemFree(path);
+                }
+                item->Release();
+            }
+        }
+        dlg->Release();
+        return result;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +200,17 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
                            color);
         }
     }
+
+    // In-cell browse button for the selected folder/file row (drawn over the value cell's
+    // right edge; the selection fill masks any value text beneath it).
+    if (const auto btn{BrowseButtonRect()})
+    {
+        const bool folder{SelectedPathRole() == Environ::core::KnowledgeBase::PathRole::Folder};
+        ctx.brush->SetColor(s.rowSelected.fill);
+        ctx.rt->FillRectangle(*btn, ctx.brush);
+        const std::wstring glyph(1, folder ? kGlyphFolder : kGlyphFile);
+        ui::DrawString(ctx, glyph, ctx.fmtGlyph, *btn, s.rowSelected.text);
+    }
 }
 
 bool ui::GridView::OnMouseMove(const ViewContext& /*ctx*/, float x, float y)
@@ -149,9 +223,15 @@ bool ui::GridView::OnMouseLeave()
     return m_grid.OnMouseLeave();
 }
 
-bool ui::GridView::OnLButtonDown(const ViewContext& /*ctx*/, float x, float y,
+bool ui::GridView::OnLButtonDown(const ViewContext& ctx, float x, float y,
                                  bool shift, bool ctrl)
 {
+    // The in-cell browse button takes priority over normal grid selection.
+    if (const auto btn{BrowseButtonRect()}; btn && InRect(*btn, x, y))
+    {
+        BrowseSelected(ctx); // invalidates if the value changed
+        return false;
+    }
     return m_grid.OnLButtonDown(x, y, shift, ctrl);
 }
 
@@ -446,10 +526,44 @@ void ui::GridView::RefreshEditFont(const ViewContext& ctx)
 // Menu / clipboard
 // ---------------------------------------------------------------------------
 
+Environ::core::KnowledgeBase::PathRole ui::GridView::SelectedPathRole() const
+{
+    using PathRole = Environ::core::KnowledgeBase::PathRole;
+    if (!m_grid.SelectionEditable()) return PathRole::None;
+    if (m_grid.SelectedIsPathEntry()) return PathRole::Folder; // path segments are directories
+    return m_knowledge.path_role(m_grid.SelectedVariableName());
+}
+
+std::optional<D2D1_RECT_F> ui::GridView::BrowseButtonRect() const
+{
+    if (m_grid.IsEditing()) return std::nullopt; // editor occupies the cell
+    if (SelectedPathRole() == Environ::core::KnowledgeBase::PathRole::None) return std::nullopt;
+    const auto cell{m_grid.SelectedValueCellRect()};
+    if (!cell) return std::nullopt;
+    const float h{cell->bottom - cell->top}; // square button at the cell's right edge
+    return D2D1::RectF(cell->right - h, cell->top, cell->right, cell->bottom);
+}
+
+void ui::GridView::BrowseSelected(const ViewContext& ctx)
+{
+    using PathRole = Environ::core::KnowledgeBase::PathRole;
+    const PathRole role{SelectedPathRole()};
+    if (role == PathRole::None) return;
+    const std::wstring original{m_grid.SelectedValueText()};
+    if (auto picked{BrowseForPath(ctx.hwnd, role == PathRole::Folder, original)})
+    {
+        // Keep the %VAR% form if the pick resolves to the same place as the old value.
+        const std::wstring value{Environ::core::preserve_env_form(original, *picked)};
+        if (m_grid.SetSelectedValue(value))
+            InvalidateRect(ctx.hwnd, nullptr, FALSE);
+    }
+}
+
 void ui::GridView::ShowGridContextMenu(const ViewContext& ctx, int screenX, int screenY)
 {
     const bool editable{m_grid.SelectionEditable()};
     const bool isPath{m_grid.SelectedIsPathEntry()};
+    const auto role{SelectedPathRole()};
 
     HMENU hMenu{CreatePopupMenu()};
     if (!hMenu) return;
@@ -458,6 +572,8 @@ void ui::GridView::ShowGridContextMenu(const ViewContext& ctx, int screenX, int 
     MenuItemData dataCopy{selCount > 1 ? std::format(L"Copy {} rows", selCount) : std::wstring{L"Copy"}, L"Ctrl+C"};
     MenuItemData dataInsert{isPath ? L"Insert entry" : L"New variable", L"Ins"};
     MenuItemData dataRemove{isPath ? L"Remove entry" : L"Delete variable", L"Del"};
+    MenuItemData dataBrowse{role == Environ::core::KnowledgeBase::PathRole::File
+                                ? L"Browse for file\x2026" : L"Browse for folder\x2026", L""};
 
     const auto addItem = [&](UINT id, MenuItemData* data, bool enabled) {
         MENUITEMINFOW mi{};
@@ -471,6 +587,8 @@ void ui::GridView::ShowGridContextMenu(const ViewContext& ctx, int screenX, int 
     };
 
     addItem(kMenuCopy, &dataCopy, true);
+    if (role != Environ::core::KnowledgeBase::PathRole::None)
+        addItem(kMenuBrowse, &dataBrowse, true);
     addItem(kMenuInsert, &dataInsert, editable);
     addItem(kMenuRemove, &dataRemove, editable);
 
