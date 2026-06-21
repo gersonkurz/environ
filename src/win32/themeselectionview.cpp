@@ -25,39 +25,55 @@ ui::ThemeSelectionView::ThemeSelectionView(theme::ThemeSet& themes)
 // View overrides
 // ---------------------------------------------------------------------------
 
+void ui::ThemeSelectionView::BuildEntries()
+{
+    m_entries.clear();
+    const auto themes{m_themes.Themes()};
+
+    // Group: dark themes first, then light; a header precedes each non-empty group.
+    const auto addGroup = [&](const wchar_t* title, bool dark) {
+        bool headerAdded{false};
+        for (const auto& t : themes)
+        {
+            if (t.dark != dark) continue;
+            if (!headerAdded)
+            {
+                m_entries.push_back(Entry{true, title, {}});
+                headerAdded = true;
+            }
+            m_entries.push_back(Entry{false, std::wstring{t.name.begin(), t.name.end()}, t.name});
+        }
+    };
+    addGroup(L"Dark", true);
+    addGroup(L"Light", false);
+}
+
 void ui::ThemeSelectionView::Activate(const ViewContext& /*ctx*/)
 {
-    m_names = m_themes.Names();
+    BuildEntries();
 
-    // Find the index of the currently active theme.
+    // Select the entry for the currently active theme.
     const auto& cur{m_themes.Current().name};
     m_selected = -1;
-    for (int i{0}; i < static_cast<int>(m_names.size()); ++i)
+    for (int i{0}; i < static_cast<int>(m_entries.size()); ++i)
     {
-        if (m_names[static_cast<size_t>(i)] == cur)
-        {
-            m_selected = i;
-            break;
-        }
+        const Entry& e{m_entries[static_cast<size_t>(i)]};
+        if (!e.header && e.themeName == cur) { m_selected = i; break; }
     }
 
     m_rowHover = -1;
     m_btnHover = -1;
     m_scroll = 0.0f;
+    // Defer scrolling the selection into view until the first paint, when the real
+    // bounds (and thus the list viewport) are known — m_lastBounds is stale here.
+    m_needScrollToSelected = true;
     m_pendingAction = Action::None;
     m_themeChanged = false;
-
-    // Scroll so the current theme is visible on open.
-    if (m_selected >= 0)
-    {
-        const Geom g{ComputeLayout(m_lastBounds)};
-        EnsureVisible(g, m_selected);
-    }
 }
 
 void ui::ThemeSelectionView::Deactivate()
 {
-    m_names.clear();
+    m_entries.clear();
 }
 
 void ui::ThemeSelectionView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
@@ -65,6 +81,18 @@ void ui::ThemeSelectionView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bo
     m_lastBounds = bounds;
     const theme::ColorScheme& s{*ctx.scheme};
     const Geom g{ComputeLayout(bounds)};
+
+    // Now that the real viewport is known, bring the selection into view (once after
+    // Activate), then always clamp so the list can never sit scrolled into empty space.
+    if (m_needScrollToSelected)
+    {
+        // Prefer showing the group header just above the selection, if any.
+        const int target{(m_selected > 0 && m_entries[static_cast<size_t>(m_selected) - 1].header)
+                             ? m_selected - 1 : m_selected};
+        EnsureVisible(g, target);
+        m_needScrollToSelected = false;
+    }
+    ClampScroll(g);
 
     // Card
     ctx.brush->SetColor(s.card.fill);
@@ -81,7 +109,7 @@ void ui::ThemeSelectionView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bo
     // Theme list
     ctx.rt->PushAxisAlignedClip(g.list, D2D1_ANTIALIAS_MODE_ALIASED);
 
-    if (m_names.empty())
+    if (m_entries.empty())
     {
         ui::DrawString(ctx, L"No themes found.", ctx.fmtValue,
                        D2D1::RectF(g.list.left + 8.0f, g.list.top,
@@ -91,33 +119,42 @@ void ui::ThemeSelectionView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bo
     else
     {
         float y{g.list.top - m_scroll};
-        for (int i{0}; i < static_cast<int>(m_names.size()); ++i)
+        for (int i{0}; i < static_cast<int>(m_entries.size()); ++i)
         {
-            const bool selected{i == m_selected};
-            const bool hovered{i == m_rowHover && !selected};
-
+            const Entry& e{m_entries[static_cast<size_t>(i)]};
             const D2D1_RECT_F rowRect{D2D1::RectF(g.list.left, y, g.list.right, y + g.rowH)};
 
-            // Row background
-            if (selected)
+            if (e.header)
             {
-                ctx.brush->SetColor(s.accent);
-                ctx.rt->FillRectangle(rowRect, ctx.brush);
+                // Group header: muted label, no background, no selection.
+                ui::DrawString(ctx, e.label, ctx.fmtSub,
+                               D2D1::RectF(g.list.left + 8.0f, y,
+                                           g.list.right - 8.0f, y + g.rowH),
+                               s.headerSubtext);
             }
-            else if (hovered)
+            else
             {
-                ctx.brush->SetColor(s.rowHover.fill);
-                ctx.rt->FillRectangle(rowRect, ctx.brush);
-            }
+                const bool selected{i == m_selected};
+                const bool hovered{i == m_rowHover && !selected};
 
-            // Theme name
-            const auto& name{m_names[static_cast<size_t>(i)]};
-            std::wstring wname{name.begin(), name.end()};
-            ui::DrawString(ctx, wname, ctx.fmtValue,
-                           D2D1::RectF(g.list.left + 8.0f, y,
-                                       g.list.right - 8.0f, y + g.rowH),
-                           selected ? s.accentText
-                                    : (hovered ? s.rowHover.text : s.headerText));
+                if (selected)
+                {
+                    ctx.brush->SetColor(s.accent);
+                    ctx.rt->FillRectangle(rowRect, ctx.brush);
+                }
+                else if (hovered)
+                {
+                    ctx.brush->SetColor(s.rowHover.fill);
+                    ctx.rt->FillRectangle(rowRect, ctx.brush);
+                }
+
+                // Indented under the group header.
+                ui::DrawString(ctx, e.label, ctx.fmtValue,
+                               D2D1::RectF(g.list.left + 22.0f, y,
+                                           g.list.right - 8.0f, y + g.rowH),
+                               selected ? s.accentText
+                                        : (hovered ? s.rowHover.text : s.headerText));
+            }
 
             y += g.rowH;
         }
@@ -169,7 +206,7 @@ bool ui::ThemeSelectionView::OnLButtonDown(const ViewContext& /*ctx*/, float x, 
     if (row >= 0 && row != m_selected)
     {
         m_selected = row;
-        m_themes.SelectByName(m_names[static_cast<size_t>(row)]);
+        m_themes.SelectByName(m_entries[static_cast<size_t>(row)].themeName);
         m_themeChanged = true;
         return true;
     }
@@ -179,11 +216,8 @@ bool ui::ThemeSelectionView::OnLButtonDown(const ViewContext& /*ctx*/, float x, 
 bool ui::ThemeSelectionView::OnWheel(const ViewContext& /*ctx*/, int delta)
 {
     const Geom g{ComputeLayout(m_lastBounds)};
-    const float viewH{g.list.bottom - g.list.top};
-    const float contentH{static_cast<float>(m_names.size()) * g.rowH};
-    const float maxScroll{std::max(0.0f, contentH - viewH)};
     m_scroll -= (static_cast<float>(delta) / WHEEL_DELTA) * 3.0f * g.rowH;
-    m_scroll = std::clamp(m_scroll, 0.0f, maxScroll);
+    ClampScroll(g);
     return true;
 }
 
@@ -196,20 +230,19 @@ bool ui::ThemeSelectionView::OnKey(const ViewContext& /*ctx*/, int vk)
     }
     if (vk == VK_UP || vk == VK_DOWN)
     {
-        const int n{static_cast<int>(m_names.size())};
-        if (n > 0)
+        const int dir{vk == VK_UP ? -1 : 1};
+        int next;
+        if (m_selected < 0)
+            next = (dir > 0) ? NextThemeRow(-1, 1)
+                             : NextThemeRow(static_cast<int>(m_entries.size()), -1);
+        else
+            next = NextThemeRow(m_selected, dir);
+
+        if (next >= 0 && next != m_selected)
         {
-            int newSel;
-            if (vk == VK_UP)
-                newSel = (m_selected <= 0) ? 0 : m_selected - 1;
-            else
-                newSel = (m_selected < 0) ? 0 : std::min(m_selected + 1, n - 1);
-            if (newSel != m_selected)
-            {
-                m_selected = newSel;
-                m_themes.SelectByName(m_names[static_cast<size_t>(newSel)]);
-                m_themeChanged = true;
-            }
+            m_selected = next;
+            m_themes.SelectByName(m_entries[static_cast<size_t>(next)].themeName);
+            m_themeChanged = true;
             const Geom g{ComputeLayout(m_lastBounds)};
             EnsureVisible(g, m_selected);
         }
@@ -265,21 +298,36 @@ int ui::ThemeSelectionView::RowAtPoint(const Geom& g, float x, float y) const
         return -1;
     const float ry{y - g.list.top + m_scroll};
     const int row{static_cast<int>(ry / g.rowH)};
-    if (row < 0 || row >= static_cast<int>(m_names.size())) return -1;
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return -1;
+    if (m_entries[static_cast<size_t>(row)].header) return -1; // headers aren't selectable
     return row;
+}
+
+int ui::ThemeSelectionView::NextThemeRow(int from, int dir) const
+{
+    const int n{static_cast<int>(m_entries.size())};
+    for (int i{from + dir}; i >= 0 && i < n; i += dir)
+        if (!m_entries[static_cast<size_t>(i)].header) return i;
+    return -1;
+}
+
+void ui::ThemeSelectionView::ClampScroll(const Geom& g)
+{
+    const float viewH{g.list.bottom - g.list.top};
+    const float contentH{static_cast<float>(m_entries.size()) * g.rowH};
+    const float maxScroll{std::max(0.0f, contentH - viewH)};
+    m_scroll = std::clamp(m_scroll, 0.0f, maxScroll);
 }
 
 void ui::ThemeSelectionView::EnsureVisible(const Geom& g, int idx)
 {
-    if (idx < 0 || idx >= static_cast<int>(m_names.size())) return;
+    if (idx < 0 || idx >= static_cast<int>(m_entries.size())) return;
     const float top{static_cast<float>(idx) * g.rowH};
     const float bottom{top + g.rowH};
     const float viewH{g.list.bottom - g.list.top};
     if (top < m_scroll) m_scroll = top;
     else if (bottom > m_scroll + viewH) m_scroll = bottom - viewH;
-    const float maxScroll{std::max(0.0f,
-        static_cast<float>(m_names.size()) * g.rowH - viewH)};
-    m_scroll = std::clamp(m_scroll, 0.0f, maxScroll);
+    ClampScroll(g);
 }
 
 // ---------------------------------------------------------------------------

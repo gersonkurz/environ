@@ -112,6 +112,7 @@ namespace theme
                 .headerSubtext{p.base04},
                 .readonlyText{p.base03},
                 .darkTitleBar{Luminance(p.base00) < 0.5f},
+                .isDark{Luminance(p.base00) < 0.5f},
                 .card{.fill{p.base01}, .border{p.base02}, .text{p.base05}, .borderWidth{1.0f}},
                 .header{.fill{p.base01}, .border{p.base02}, .text{p.base04}, .borderWidth{0.0f}},
                 .row{.fill{p.base01}, .border{p.base01}, .text{p.base05}, .borderWidth{0.0f}},
@@ -245,5 +246,14 @@ namespace theme
         for (const auto& s : m_schemes)
             names.push_back(s.name);
         return names;
+    }
+
+    std::vector<ThemeInfo> ThemeSet::Themes() const
+    {
+        std::vector<ThemeInfo> infos;
+        infos.reserve(m_schemes.size());
+        for (const auto& s : m_schemes)
+            infos.push_back(ThemeInfo{s.name, s.isDark});
+        return infos;
     }
 }

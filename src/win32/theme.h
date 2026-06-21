@@ -40,6 +40,7 @@ namespace theme
         D2D1_COLOR_F headerSubtext;
         D2D1_COLOR_F readonlyText; // machine vars when unelevated
         bool darkTitleBar;
+        bool isDark; // dark vs light scheme (from background luminance); used for grouping
         Style card;
         Style header;       // grid column-header row
         Style row;
@@ -52,6 +53,13 @@ namespace theme
         Style edit;              // inline cell editor: fill + focus border + text
     };
 
+    // A theme's name plus whether it is a dark scheme — for grouped listings.
+    struct ThemeInfo
+    {
+        std::string name;
+        bool dark;
+    };
+
     // Owns the available schemes loaded from Base16 YAML files in a themes/ directory.
     // Falls back to a hardcoded dark scheme if the directory is empty or missing.
     class ThemeSet
@@ -62,6 +70,7 @@ namespace theme
         const ColorScheme& Current() const { return m_schemes[m_current]; }
         size_t Count() const { return m_schemes.size(); }
         std::vector<std::string> Names() const;
+        std::vector<ThemeInfo> Themes() const; // names + dark/light, in load order
 
     private:
         std::vector<ColorScheme> m_schemes;

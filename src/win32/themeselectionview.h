@@ -41,18 +41,31 @@ private:
         float rowH{32.0f};
     };
 
+    // One row in the list: either a group header ("Dark"/"Light") or a theme.
+    struct Entry
+    {
+        bool header{false};
+        std::wstring label;    // display text (header title or theme name)
+        std::string themeName; // scheme name to select (theme rows only)
+    };
+
+    void  BuildEntries();
+    int   NextThemeRow(int from, int dir) const; // skips headers; -1 if none
+
     Geom  ComputeLayout(const D2D1_RECT_F& bounds) const;
-    int   RowAtPoint(const Geom& g, float x, float y) const;
+    int   RowAtPoint(const Geom& g, float x, float y) const; // theme rows only, else -1
     void  EnsureVisible(const Geom& g, int idx);
+    void  ClampScroll(const Geom& g);
     void  DrawButton(const ViewContext& ctx, const D2D1_RECT_F& r,
                      const wchar_t* label, bool primary, bool hover) const;
 
-    theme::ThemeSet&         m_themes;
-    std::vector<std::string> m_names;
-    int   m_selected{-1};
-    int   m_rowHover{-1};
+    theme::ThemeSet&     m_themes;
+    std::vector<Entry>   m_entries;
+    int   m_selected{-1};   // index into m_entries (a theme row), or -1
+    int   m_rowHover{-1};   // index into m_entries (a theme row), or -1
     int   m_btnHover{-1};
     float m_scroll{0.0f};
+    bool  m_needScrollToSelected{false}; // honor on next paint (real bounds known)
     D2D1_RECT_F m_lastBounds{};
     Action m_pendingAction{Action::None};
     bool   m_themeChanged{false};
