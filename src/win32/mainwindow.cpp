@@ -8,6 +8,7 @@
 #include "mainwindow.h"
 #include "EnvStore.h"
 #include "EnvWriter.h"
+#include "EnvExport.h"
 #include "SnapshotStore.h"
 
 #ifndef DWMWA_SYSTEMBACKDROP_TYPE
@@ -74,6 +75,69 @@ namespace
     bool InRect(const D2D1_RECT_F& r, float x, float y)
     {
         return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+    }
+
+    // A .toml save/open dialog. Returns the chosen path, or nullopt if cancelled/failed.
+    std::optional<std::wstring> ShowTomlFileDialog(HWND owner, bool save, const std::wstring& defaultName)
+    {
+        IFileDialog* dlg{nullptr};
+        if (FAILED(CoCreateInstance(save ? CLSID_FileSaveDialog : CLSID_FileOpenDialog,
+                                    nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg))) || !dlg)
+            return std::nullopt;
+
+        const COMDLG_FILTERSPEC filters[]{{L"TOML files", L"*.toml"}, {L"All files", L"*.*"}};
+        dlg->SetFileTypes(2, filters);
+        dlg->SetDefaultExtension(L"toml");
+        if (save && !defaultName.empty()) dlg->SetFileName(defaultName.c_str());
+
+        std::optional<std::wstring> result;
+        if (SUCCEEDED(dlg->Show(owner)))
+        {
+            IShellItem* item{nullptr};
+            if (SUCCEEDED(dlg->GetResult(&item)) && item)
+            {
+                PWSTR path{nullptr};
+                if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path)
+                {
+                    result = path;
+                    CoTaskMemFree(path);
+                }
+                item->Release();
+            }
+        }
+        dlg->Release();
+        return result;
+    }
+
+    bool WriteAllBytes(const std::wstring& path, const std::string& bytes)
+    {
+        const HANDLE h{CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr,
+                                   CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        if (h == INVALID_HANDLE_VALUE) return false;
+        DWORD written{0};
+        const BOOL ok{WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr)};
+        CloseHandle(h);
+        return ok && written == bytes.size();
+    }
+
+    std::string ReadAllBytes(const std::wstring& path)
+    {
+        const HANDLE h{CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        if (h == INVALID_HANDLE_VALUE) return {};
+        std::string out;
+        LARGE_INTEGER size{};
+        if (GetFileSizeEx(h, &size) && size.QuadPart > 0 && size.QuadPart < (16 << 20))
+        {
+            out.resize(static_cast<size_t>(size.QuadPart));
+            DWORD read{0};
+            if (!ReadFile(h, out.data(), static_cast<DWORD>(out.size()), &read, nullptr))
+                out.clear();
+            else
+                out.resize(read);
+        }
+        CloseHandle(h);
+        return out;
     }
 
     // Context menu item IDs (used by WM_COMMAND for owner-draw menu dispatching).
@@ -309,6 +373,48 @@ void ui::MainWindow::ApplyThemeChange()
 void ui::MainWindow::LoadData()
 {
     m_gridView.LoadData(m_elevated);
+}
+
+void ui::MainWindow::ExportToml()
+{
+    using namespace Environ::core;
+    const auto path{ShowTomlFileDialog(m_hwnd, true, L"environ.toml")};
+    if (!path) return;
+
+    const std::string toml{export_toml(m_grid.CurrentVars(Scope::User),
+                                       m_grid.CurrentVars(Scope::Machine))};
+    ShowMsgBox(L"environ", WriteAllBytes(*path, toml)
+                               ? L"Environment exported."
+                               : L"Could not write the export file.");
+}
+
+void ui::MainWindow::ImportToml()
+{
+    using namespace Environ::core;
+    const auto path{ShowTomlFileDialog(m_hwnd, false, L"")};
+    if (!path) return;
+
+    auto imported{import_toml(ReadAllBytes(*path))};
+    if (!imported)
+    {
+        ShowMsgBox(L"environ", L"Could not parse the selected TOML file.");
+        return;
+    }
+
+    // Overlay imported values onto the current registry state and present the result as
+    // pending edits (review + Save), reusing the snapshot-restore machinery.
+    auto curUser{read_variables(Scope::User, &m_knowledge)};
+    auto curMachine{read_variables(Scope::Machine, &m_knowledge)};
+    auto mergedUser{merge_variables(curUser, imported->user)};
+    auto mergedMachine{merge_variables(curMachine, imported->machine)};
+    expand_and_validate(mergedUser);
+    expand_and_validate(mergedMachine);
+    detect_duplicates(mergedUser, mergedMachine);
+
+    if (m_activeView != &m_gridView) SwitchToView(&m_gridView);
+    m_grid.SetDataForRestore(curUser, curMachine, mergedUser, mergedMachine, m_elevated);
+    m_gridView.SetCounts(mergedUser.size(), mergedMachine.size());
+    InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
 void ui::MainWindow::SaveChanges()
@@ -647,6 +753,8 @@ std::vector<ui::MainWindow::NavItem> ui::MainWindow::NavItems() const
         {L"Themes",  L"",       NavAction::Themes},
         {L"History", L"Ctrl+H", NavAction::History},
         {L"Save",    L"Ctrl+S", NavAction::Save},
+        {L"Export\x2026", L"",  NavAction::Export},
+        {L"Import\x2026", L"",  NavAction::Import},
     };
     // Offer elevation only when it would change anything.
     if (!m_elevated)
@@ -696,6 +804,14 @@ void ui::MainWindow::HandleNavClick(int item)
         break;
     case NavAction::Save:
         SaveChanges();
+        break;
+    case NavAction::Export:
+        if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
+        ExportToml();
+        break;
+    case NavAction::Import:
+        if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
+        ImportToml();
         break;
     case NavAction::RunAsAdmin:
         RelaunchAsAdmin();

@@ -22,8 +22,8 @@ staying on C++/WinUI (the path that failed twice).
 - **Modern = typography + palette, not motion.** Segoe UI Variable via DirectWrite,
   a careful color table, ~1px borders, Win11 chrome (Mica/rounded/dark title bar).
 - **One theme table.** Every painter reads named per-state styles from a `ColorScheme`
-  (inspired by ProAKT's `DataSet`/`ColorScheme`), loaded from `theme.toml`. No color
-  literals in painting code.
+  (inspired by ProAKT's `DataSet`/`ColorScheme`), mapped from Base16 YAML files in a
+  `themes/` directory beside the exe. No color literals in painting code.
 - **Custom-drawn everything**, except the transient inline cell editor, which is a
   skinned standard `EDIT` (borderless, `WM_CTLCOLOREDIT`).
 - **Tiny and dependency-light.** No new deps without asking. No vcpkg.
@@ -44,13 +44,15 @@ just clean             # wipe build dirs
 ```
 
 ## Phases
-- **Phase 6 — Settings & theming UI.** In-app theme switch, custom schemes, window
-  placement persistence, **Ctrl+Mousewheel zoom**, a **typography section in the theme
-  table** (font family/size/weight — currently fonts live in code), UI **metrics**
-  (caption/row height, button width) for Compact/Comfortable density modes, and a
-  **user-configurable list of PATH-like variable names** (which variables get segment
-  expansion; overlaps with `KnowledgeBase`).
-- **Phase 7 — Elevation.** "Restart as Administrator" for `HKLM` editing; machine vars
-  read-only until then.
-- **Phase 8 — Polish.** Search/filter, TOML export/import, accessibility (UIA) assessment.
+- **Phase 6 — Settings & theming UI (done).** In-app theme switch, Base16 YAML custom
+  schemes, window-placement persistence, Ctrl+Mousewheel zoom (with zoom-scaled columns),
+  and configurable typography (font family/size via `[Appearance]` settings). The
+  knowledge base (`knowledge.toml`) drives per-variable descriptions and
+  path-list/folder/file classification, layered shipped + user override.
+- **Phase 7 — Elevation (done).** "Run as Administrator" relaunch (hamburger nav +
+  title-bar button) for `HKLM` editing; machine vars read-only until then.
+- **Phase 8 — Polish.** Search/filter and the folder/file browse picker are done.
+  Remaining:
+  - **TOML export/import** — wire `EnvExport` into the host.
+  - **Horizontal scrolling** for long values at high zoom (lower priority).
 
