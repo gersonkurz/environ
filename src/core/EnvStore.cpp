@@ -258,6 +258,37 @@ std::vector<EnvVariable> read_process_extras(
     return result;
 }
 
+void learn_classifications(KnowledgeBase& kb, std::vector<EnvVariable>& variables) {
+    for (auto& var : variables) {
+        // Skip anything the knowledge base already classifies (shipped or learned earlier).
+        if (kb.classify_override(var.name) != KnowledgeBase::ClassHint::None) continue;
+        if (kb.path_role(var.name) != KnowledgeBase::PathRole::None) continue;
+
+        const std::wstring expanded{expand_env_string(var.value)};
+        if (expanded.empty()) continue;
+
+        // A ';'-separated value whose first segment is an existing folder is a path-list.
+        if (const auto semi{expanded.find(L';')}; semi != std::wstring::npos) {
+            std::error_code ec;
+            if (std::filesystem::is_directory(expanded.substr(0, semi), ec)) {
+                if (var.kind != EnvVariableKind::PathList) { // new info the heuristic missed
+                    kb.learn_path_like(var.name);
+                    var.kind = EnvVariableKind::PathList;
+                    var.segments = split_segments(var.value);
+                }
+                continue; // a path-list isn't a single folder/file target
+            }
+        }
+
+        // A single value that is itself an existing folder or file.
+        std::error_code ec;
+        if (std::filesystem::is_directory(expanded, ec))
+            kb.learn_folder(var.name);
+        else if (std::filesystem::is_regular_file(expanded, ec))
+            kb.learn_file(var.name);
+    }
+}
+
 void expand_and_validate(std::vector<EnvVariable>& variables) {
     for (auto& var : variables) {
         var.expanded_value = expand_env_string(var.value);

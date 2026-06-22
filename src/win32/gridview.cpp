@@ -18,10 +18,12 @@ namespace
     constexpr UINT kMenuInsert{1002};
     constexpr UINT kMenuRemove{1003};
     constexpr UINT kMenuBrowse{1004};
+    constexpr UINT kMenuReveal{1005};
 
-    // Segoe Fluent Icons glyphs for the in-cell browse button.
-    constexpr wchar_t kGlyphFolder{0xE8B7}; // "Folder"
-    constexpr wchar_t kGlyphFile{0xE8A5};   // "Document"
+    // Segoe Fluent Icons glyphs for the in-cell action button.
+    constexpr wchar_t kGlyphFolder{0xE8B7}; // "Folder" (browse-to-change a folder)
+    constexpr wchar_t kGlyphFile{0xE8A5};   // "Document" (browse-to-change a file)
+    constexpr wchar_t kGlyphReveal{0xE8A7}; // "OpenInNewWindow" (open/reveal in Explorer)
 
     // Owner-drawn menu item data -- stored in MENUITEMINFO::dwItemData.
     struct MenuItemData
@@ -87,6 +89,30 @@ namespace
         dlg->Release();
         return result;
     }
+
+    // Open `target` (may contain %VARS%) in Explorer. For a folder, open it directly; for
+    // a file, open its parent folder with the file selected. Read-only-safe: this never
+    // changes anything, so it works for Process vars and unelevated machine vars.
+    void OpenInExplorer(const std::wstring& target, bool isFolder)
+    {
+        if (target.empty()) return;
+        wchar_t expanded[1024]{};
+        ExpandEnvironmentStringsW(target.c_str(), expanded, 1024);
+        if (!expanded[0]) return;
+
+        if (isFolder)
+        {
+            ShellExecuteW(nullptr, L"open", expanded, nullptr, nullptr, SW_SHOWNORMAL);
+            return;
+        }
+
+        // File: open the parent folder and select the file.
+        if (PIDLIST_ABSOLUTE pidl{ILCreateFromPathW(expanded)})
+        {
+            SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
+            ILFree(pidl);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +120,7 @@ namespace
 // ---------------------------------------------------------------------------
 
 ui::GridView::GridView(Grid& grid, theme::ThemeSet& theme,
-                       const Environ::core::KnowledgeBase& knowledge)
+                       Environ::core::KnowledgeBase& knowledge)
     : m_grid{grid}, m_theme{theme}, m_knowledge{knowledge}
 {
 }
@@ -203,14 +229,24 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
         }
     }
 
-    // In-cell browse button for the selected folder/file row (drawn over the value cell's
-    // right edge; the selection fill masks any value text beneath it).
-    if (const auto btn{BrowseButtonRect()})
+    // In-cell action button for the selected path row (drawn over the value cell's right
+    // edge; the selection fill masks any value text beneath it). Editable rows get a
+    // browse-to-change button; read-only path rows get a reveal-in-Explorer button.
+    if (const auto btn{CellButtonRect()})
     {
-        const bool folder{SelectedPathRole() == Environ::core::KnowledgeBase::PathRole::Folder};
+        wchar_t glyphChar{kGlyphReveal};
+        switch (SelectedCellAction())
+        {
+        case CellAction::Browse:
+            glyphChar = (SelectedPathRole() == Environ::core::KnowledgeBase::PathRole::File)
+                            ? kGlyphFile : kGlyphFolder;
+            break;
+        case CellAction::Reveal: glyphChar = kGlyphReveal; break;
+        case CellAction::None:   break;
+        }
         ctx.brush->SetColor(s.rowSelected.fill);
         ctx.rt->FillRectangle(*btn, ctx.brush);
-        const std::wstring glyph(1, folder ? kGlyphFolder : kGlyphFile);
+        const std::wstring glyph(1, glyphChar);
         ui::DrawString(ctx, glyph, ctx.fmtGlyph, *btn, s.rowSelected.text);
     }
 }
@@ -228,10 +264,15 @@ bool ui::GridView::OnMouseLeave()
 bool ui::GridView::OnLButtonDown(const ViewContext& ctx, float x, float y,
                                  bool shift, bool ctrl)
 {
-    // The in-cell browse button takes priority over normal grid selection.
-    if (const auto btn{BrowseButtonRect()}; btn && InRect(*btn, x, y))
+    // The in-cell action button takes priority over normal grid selection.
+    if (const auto btn{CellButtonRect()}; btn && InRect(*btn, x, y))
     {
-        BrowseSelected(ctx); // invalidates if the value changed
+        switch (SelectedCellAction())
+        {
+        case CellAction::Browse: BrowseSelected(ctx); break; // invalidates if the value changed
+        case CellAction::Reveal: RevealSelected(ctx); break;
+        case CellAction::None:   break;
+        }
         return false;
     }
     return m_grid.OnLButtonDown(x, y, shift, ctrl);
@@ -346,14 +387,25 @@ void ui::GridView::LoadData(bool elevated)
     m_elevated = elevated;
     std::vector<EnvVariable> userVars{read_variables(Scope::User, &m_knowledge)};
     std::vector<EnvVariable> machineVars{read_variables(Scope::Machine, &m_knowledge)};
-    expand_and_validate(userVars);
-    expand_and_validate(machineVars);
-    detect_duplicates(userVars, machineVars);
 
     // Read-only "process extras" — the effective env vars Windows sets (USERPROFILE,
     // LOCALAPPDATA, ProgramFiles, ...) that aren't persistent User/Machine values.
     std::vector<EnvVariable> processVars{read_process_extras(userVars, machineVars)};
+
+    // Learn folder/file/path-list classifications by probing values on disk, then persist
+    // the newly-learned ones so the knowledge base — not a per-paint disk probe — drives
+    // the browse/reveal affordances. learn_classifications may flip a value to a path-list,
+    // so expand/validate after it.
+    learn_classifications(m_knowledge, userVars);
+    learn_classifications(m_knowledge, machineVars);
+    learn_classifications(m_knowledge, processVars);
+    if (m_knowledge.has_learned() && !m_userKnowledgePath.empty())
+        m_knowledge.save_learned(pnq::unicode::to_utf8(m_userKnowledgePath));
+
+    expand_and_validate(userVars);
+    expand_and_validate(machineVars);
     expand_and_validate(processVars);
+    detect_duplicates(userVars, machineVars);
 
     m_userCount = userVars.size();
     m_machineCount = machineVars.size();
@@ -544,15 +596,34 @@ void ui::GridView::RefreshEditFont(const ViewContext& ctx)
 Environ::core::KnowledgeBase::PathRole ui::GridView::SelectedPathRole() const
 {
     using PathRole = Environ::core::KnowledgeBase::PathRole;
-    if (!m_grid.SelectionEditable()) return PathRole::None;
+    if (!m_grid.SelectionEditable()) return PathRole::None; // browse-to-change needs an editable cell
     if (m_grid.SelectedIsPathEntry()) return PathRole::Folder; // path segments are directories
     return m_knowledge.path_role(m_grid.SelectedVariableName());
 }
 
-std::optional<D2D1_RECT_F> ui::GridView::BrowseButtonRect() const
+Environ::core::KnowledgeBase::PathRole ui::GridView::SelectedRevealRole() const
+{
+    using PathRole = Environ::core::KnowledgeBase::PathRole;
+    // Reveal is editability-independent: it works for read-only rows (Process vars,
+    // unelevated machine vars) — that's the motivating case. Classification comes from the
+    // knowledge base, which LoadData has populated by probing values on disk.
+    if (!m_grid.HasSelection()) return PathRole::None;
+    if (auto d{m_grid.GetSelectionDetail()}; d && d->isSegment) return PathRole::Folder; // segments are folders
+    return m_knowledge.path_role(m_grid.SelectedVariableName());
+}
+
+ui::GridView::CellAction ui::GridView::SelectedCellAction() const
+{
+    using PathRole = Environ::core::KnowledgeBase::PathRole;
+    if (SelectedPathRole() != PathRole::None) return CellAction::Browse;  // editable -> browse-to-change
+    if (SelectedRevealRole() != PathRole::None) return CellAction::Reveal; // read-only -> reveal only
+    return CellAction::None;
+}
+
+std::optional<D2D1_RECT_F> ui::GridView::CellButtonRect() const
 {
     if (m_grid.IsEditing()) return std::nullopt; // editor occupies the cell
-    if (SelectedPathRole() == Environ::core::KnowledgeBase::PathRole::None) return std::nullopt;
+    if (SelectedCellAction() == CellAction::None) return std::nullopt;
     const auto cell{m_grid.SelectedValueCellRect()};
     if (!cell) return std::nullopt;
     const float h{cell->bottom - cell->top}; // square button at the cell's right edge
@@ -574,11 +645,26 @@ void ui::GridView::BrowseSelected(const ViewContext& ctx)
     }
 }
 
+void ui::GridView::RevealSelected(const ViewContext&)
+{
+    using PathRole = Environ::core::KnowledgeBase::PathRole;
+    const PathRole role{SelectedRevealRole()};
+    if (role == PathRole::None) return;
+    // Prefer the detail strip's expanded path; fall back to the raw value text.
+    std::wstring target;
+    if (auto d{m_grid.GetSelectionDetail()}; d && !d->expandedPath.empty())
+        target = d->expandedPath;
+    else
+        target = m_grid.SelectedValueText();
+    OpenInExplorer(target, role == PathRole::Folder);
+}
+
 void ui::GridView::ShowGridContextMenu(const ViewContext& ctx, int screenX, int screenY)
 {
     const bool editable{m_grid.SelectionEditable()};
     const bool isPath{m_grid.SelectedIsPathEntry()};
     const auto role{SelectedPathRole()};
+    const auto revealRole{SelectedRevealRole()};
 
     HMENU hMenu{CreatePopupMenu()};
     if (!hMenu) return;
@@ -589,6 +675,8 @@ void ui::GridView::ShowGridContextMenu(const ViewContext& ctx, int screenX, int 
     MenuItemData dataRemove{isPath ? L"Remove entry" : L"Delete variable", L"Del"};
     MenuItemData dataBrowse{role == Environ::core::KnowledgeBase::PathRole::File
                                 ? L"Browse for file\x2026" : L"Browse for folder\x2026", L""};
+    MenuItemData dataReveal{revealRole == Environ::core::KnowledgeBase::PathRole::File
+                                ? L"Reveal in Explorer\x2026" : L"Open in Explorer\x2026", L""};
 
     const auto addItem = [&](UINT id, MenuItemData* data, bool enabled) {
         MENUITEMINFOW mi{};
@@ -604,6 +692,8 @@ void ui::GridView::ShowGridContextMenu(const ViewContext& ctx, int screenX, int 
     addItem(kMenuCopy, &dataCopy, true);
     if (role != Environ::core::KnowledgeBase::PathRole::None)
         addItem(kMenuBrowse, &dataBrowse, true);
+    if (revealRole != Environ::core::KnowledgeBase::PathRole::None)
+        addItem(kMenuReveal, &dataReveal, true);
     addItem(kMenuInsert, &dataInsert, editable);
     addItem(kMenuRemove, &dataRemove, editable);
 

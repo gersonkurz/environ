@@ -54,6 +54,14 @@ std::vector<EnvVariable> read_process_extras(
 // Expand environment variable references and validate path segments.
 void expand_and_validate(std::vector<EnvVariable>& variables);
 
+// Learn folder/file/path-list classifications for variables the knowledge base does not
+// already classify, by probing what each value points to on disk:
+//   - a ';'-separated value whose first segment is an existing folder -> path-list;
+//   - a value that is itself an existing folder / file -> that role.
+// Updates `kb` in-memory (so the current session reflects it) and re-splits any value
+// newly recognized as a path-list. Persist the learnings with KnowledgeBase::save_learned().
+void learn_classifications(KnowledgeBase& kb, std::vector<EnvVariable>& variables);
+
 // Detect duplicate path segments across and within variables.
 // Populates segment_duplicate with a message for each duplicate, empty if unique.
 void detect_duplicates(std::vector<EnvVariable>& user_vars,

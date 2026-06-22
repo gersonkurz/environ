@@ -145,6 +145,7 @@ namespace
     constexpr UINT kMenuInsert{1002};
     constexpr UINT kMenuRemove{1003};
     constexpr UINT kMenuBrowse{1004};
+    constexpr UINT kMenuReveal{1005};
 
     // Owner-drawn menu item data -- stored in MENUITEMINFO::dwItemData.
     struct MenuItemData
@@ -187,6 +188,7 @@ bool ui::MainWindow::InitSettings()
     };
     loadKnowledge(ShippedKnowledgeFile());
     loadKnowledge(UserKnowledgeFile());
+    m_gridView.SetUserKnowledgePath(UserKnowledgeFile()); // where runtime learnings persist
 
     return true;
 }
@@ -1430,6 +1432,9 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
                 return 0;
             case kMenuBrowse:
                 m_gridView.BrowseSelected(ctx);
+                return 0;
+            case kMenuReveal:
+                m_gridView.RevealSelected(ctx);
                 return 0;
             case kMenuInsert:
                 if (m_grid.SelectedIsPathEntry())

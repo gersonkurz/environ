@@ -12,7 +12,7 @@ namespace ui {
 class GridView final : public View
 {
 public:
-    GridView(Grid& grid, theme::ThemeSet& theme, const Environ::core::KnowledgeBase& knowledge);
+    GridView(Grid& grid, theme::ThemeSet& theme, Environ::core::KnowledgeBase& knowledge);
     ~GridView();
 
     // View overrides
@@ -44,6 +44,10 @@ public:
     // write the chosen path back. No-op if the selection isn't folder/file-classified.
     void BrowseSelected(const ViewContext& ctx);
 
+    // Reveal the selected path value in Explorer (open the folder / select the file).
+    // Works for read-only rows too (Process vars, machine vars when unelevated).
+    void RevealSelected(const ViewContext& ctx);
+
     // GridView-specific API (called by MainWindow)
     void LoadData(bool elevated);
     void OnEditEnd(const ViewContext& ctx, bool commit, bool tab, bool shift);
@@ -59,6 +63,9 @@ public:
 
     // Data count update (e.g. after snapshot restore)
     void SetCounts(size_t userCount, size_t machineCount) { m_userCount = userCount; m_machineCount = machineCount; }
+
+    // Where learned classifications are persisted (%LOCALAPPDATA%\environ\knowledge.toml).
+    void SetUserKnowledgePath(const std::wstring& path) { m_userKnowledgePath = path; }
 
     // Search bar (always visible when GridView is active)
     void FocusSearch();
@@ -84,13 +91,18 @@ private:
     void EnsureSearchControl(const ViewContext& ctx);
     void PositionSearchEdit(const ViewContext& ctx, const D2D1_RECT_F& bounds);
 
-    // Browse-picker support
-    Environ::core::KnowledgeBase::PathRole SelectedPathRole() const;
-    std::optional<D2D1_RECT_F> BrowseButtonRect() const; // in-cell button for the selected row
+    // Path-cell actions. canEdit (Browse, change the value) is gated on editability;
+    // canReveal (Open in Explorer) is not — read-only rows can still be revealed.
+    enum class CellAction { None, Browse, Reveal };
+    Environ::core::KnowledgeBase::PathRole SelectedPathRole() const;   // editable path -> browse
+    Environ::core::KnowledgeBase::PathRole SelectedRevealRole() const; // any path -> reveal
+    CellAction SelectedCellAction() const;                            // which the in-cell button does
+    std::optional<D2D1_RECT_F> CellButtonRect() const;                // in-cell button for the selected row
 
     Grid&             m_grid;
     theme::ThemeSet&  m_theme;
-    const Environ::core::KnowledgeBase& m_knowledge;
+    Environ::core::KnowledgeBase& m_knowledge; // non-const: LoadData learns into it
+    std::wstring      m_userKnowledgePath;     // where learnings persist
 
     // Inline editor (HWND is a child of MainWindow, managed here)
     HWND   m_edit{nullptr};
