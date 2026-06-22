@@ -324,8 +324,8 @@ std::wstring ui::GridView::GetStatusText(const ViewContext& ctx) const
 {
     const theme::ColorScheme& s{*ctx.scheme};
     std::wstring footer = std::format(
-        L"{}   \x2022   {} user, {} machine{}",
-        std::wstring(s.name.begin(), s.name.end()), m_userCount, m_machineCount,
+        L"{}   \x2022   {} user, {} machine, {} process{}",
+        std::wstring(s.name.begin(), s.name.end()), m_userCount, m_machineCount, m_processCount,
         m_elevated ? L"" : L"  (machine read-only)");
     if (m_grid.HasFilter())
         footer += std::format(L"   \x2022   {} shown (filtered)", m_grid.FilteredRowCount());
@@ -347,9 +347,16 @@ void ui::GridView::LoadData(bool elevated)
     expand_and_validate(userVars);
     expand_and_validate(machineVars);
     detect_duplicates(userVars, machineVars);
+
+    // Read-only "process extras" — the effective env vars Windows sets (USERPROFILE,
+    // LOCALAPPDATA, ProgramFiles, ...) that aren't persistent User/Machine values.
+    std::vector<EnvVariable> processVars{read_process_extras(userVars, machineVars)};
+    expand_and_validate(processVars);
+
     m_userCount = userVars.size();
     m_machineCount = machineVars.size();
-    m_grid.SetData(userVars, machineVars, m_elevated);
+    m_processCount = processVars.size();
+    m_grid.SetData(userVars, machineVars, processVars, m_elevated);
 }
 
 void ui::GridView::OnEditEnd(const ViewContext& ctx, bool commit, bool tab, bool shift)

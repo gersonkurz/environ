@@ -207,6 +207,57 @@ std::vector<EnvVariable> read_variables(Scope scope, const KnowledgeBase* kb) {
     return result;
 }
 
+std::vector<EnvVariable> read_process_extras(
+    std::vector<EnvVariable> const& userVars,
+    std::vector<EnvVariable> const& machineVars) {
+
+    // Names already shown as User/Machine (case-insensitive); excluded here.
+    std::unordered_set<std::wstring> persistent;
+    const auto add_names = [&](std::vector<EnvVariable> const& vars) {
+        for (auto const& v : vars) {
+            std::wstring key{v.name};
+            std::ranges::transform(key, key.begin(), ::towlower);
+            persistent.insert(std::move(key));
+        }
+    };
+    add_names(userVars);
+    add_names(machineVars);
+
+    std::vector<EnvVariable> result;
+    LPWCH block{GetEnvironmentStringsW()};
+    if (!block) return result;
+
+    for (LPWCH p{block}; *p; p += wcslen(p) + 1) {
+        std::wstring entry{p};
+        if (entry.front() == L'=') continue; // skip "=C:=..." per-drive working-dir entries
+        const auto eq{entry.find(L'=')};
+        if (eq == std::wstring::npos || eq == 0) continue;
+
+        std::wstring name{entry.substr(0, eq)};
+        std::wstring value{entry.substr(eq + 1)};
+        std::wstring key{name};
+        std::ranges::transform(key, key.begin(), ::towlower);
+        if (persistent.contains(key)) continue; // effective User/Machine row already (shadowing TBD)
+
+        std::vector<std::wstring> segments;
+        const EnvVariableKind kind{classify_variable(value, segments)};
+        result.push_back(EnvVariable{
+            .name{std::move(name)},
+            .value{std::move(value)},
+            .segments{std::move(segments)},
+            .kind{kind},
+            .is_expandable{false}, // process values are already expanded
+        });
+    }
+    FreeEnvironmentStringsW(block);
+
+    std::ranges::sort(result, [](const EnvVariable& a, const EnvVariable& b) {
+        return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+    });
+    spdlog::info("Read {} process-env extras", result.size());
+    return result;
+}
+
 void expand_and_validate(std::vector<EnvVariable>& variables) {
     for (auto& var : variables) {
         var.expanded_value = expand_env_string(var.value);

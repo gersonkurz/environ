@@ -26,6 +26,12 @@ struct EnvVariable {
 
     // Populated by detect_duplicates() — non-empty string = duplicate description
     std::vector<std::wstring> segment_duplicate;
+
+    // A persistent (User/Machine) variable whose effective value is overridden by Windows at
+    // sign-in (shadowed). `effective_value` holds the value actually in effect. Set by a
+    // post-pass; only ever true for KB-volatile, non-composed names (see docs/plan-process-scope.md).
+    bool shadowed{false};
+    std::wstring effective_value;
 };
 
 // Read all environment variables from the given registry scope.
@@ -35,6 +41,15 @@ struct EnvVariable {
 // If `kb` is non-null, its classification overrides win over the content heuristic
 // (a variable forced to PathList/Scalar regardless of how its value looks).
 std::vector<EnvVariable> read_variables(Scope scope, const KnowledgeBase* kb = nullptr);
+
+// Read the effective process environment (GetEnvironmentStringsW) and return the variables that
+// are NOT already represented by an effective User/Machine row — the read-only "process-env
+// extras" (USERPROFILE, LOCALAPPDATA, ProgramFiles, ...). Pass the already-read persistent vars
+// to avoid re-reading the registry. Sorted by name. (Shadow detection for persistent names whose
+// effective value differs is a separate post-pass; see docs/plan-process-scope.md.)
+std::vector<EnvVariable> read_process_extras(
+    std::vector<EnvVariable> const& userVars,
+    std::vector<EnvVariable> const& machineVars);
 
 // Expand environment variable references and validate path segments.
 void expand_and_validate(std::vector<EnvVariable>& variables);

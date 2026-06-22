@@ -25,6 +25,7 @@ namespace ui
 
     void Grid::SetData(const std::vector<Environ::core::EnvVariable>& userVars,
                        const std::vector<Environ::core::EnvVariable>& machineVars,
+                       const std::vector<Environ::core::EnvVariable>& processVars,
                        bool elevated)
     {
         using Environ::core::EnvVariable;
@@ -33,6 +34,7 @@ namespace ui
 
         m_userOrig = userVars;
         m_machineOrig = machineVars;
+        m_processVars = processVars;
         m_userStruct.assign(userVars.size(), false);
         m_machineStruct.assign(machineVars.size(), false);
         m_rows.clear();
@@ -45,12 +47,14 @@ namespace ui
         m_editing = -1;
         m_editingName = false;
 
-        const auto addGroup = [&](const std::vector<EnvVariable>& vars, Scope scope, bool readOnly) {
+        const auto addGroup = [&](const std::vector<EnvVariable>& vars, RowGroup group,
+                                  Scope scope, bool readOnly) {
             for (int vi{0}; vi < static_cast<int>(vars.size()); ++vi)
             {
                 const EnvVariable& v{vars[static_cast<size_t>(vi)]};
                 Row var{};
                 var.kind = Row::Kind::Variable;
+                var.group = group;
                 var.col1 = v.name;
                 var.col1Original = v.name;
                 var.depth = 0;
@@ -71,6 +75,7 @@ namespace ui
                     {
                         Row seg{};
                         seg.kind = Row::Kind::Segment;
+                        seg.group = group;
                         seg.col2 = v.segments[i];
                         seg.original = seg.col2;
                         seg.depth = 1;
@@ -93,8 +98,11 @@ namespace ui
             }
         };
 
-        addGroup(userVars, Scope::User, false);
-        addGroup(machineVars, Scope::Machine, !elevated);
+        addGroup(userVars, RowGroup::User, Scope::User, false);
+        addGroup(machineVars, RowGroup::Machine, Scope::Machine, !elevated);
+        // Process extras are always read-only and never written; the dummy Scope is never used
+        // (Process rows are excluded from CurrentVars/diff and the struct-dirty paint guard).
+        addGroup(processVars, RowGroup::Process, Scope::User, true);
         RebuildFiltered();
     }
 
@@ -163,6 +171,7 @@ namespace ui
                 var.col1Original = sv.name;
                 var.depth = 0;
                 var.readOnly = readOnly;
+                var.group = (scope == Scope::User) ? RowGroup::User : RowGroup::Machine;
                 var.scope = scope;
                 var.varIndex = origIdx; // -1 if new in snapshot (absent from registry)
                 var.segIndex = -1;
@@ -190,6 +199,7 @@ namespace ui
                         seg.col2 = sv.segments[i];
                         seg.depth = 1;
                         seg.readOnly = readOnly;
+                        seg.group = (scope == Scope::User) ? RowGroup::User : RowGroup::Machine;
                         seg.scope = scope;
                         seg.varIndex = origIdx;
                         seg.segIndex = static_cast<int>(i);
@@ -280,7 +290,7 @@ namespace ui
         // Suppress stale data when the row has been edited.
         if (r.col2 != r.original) return std::nullopt;
 
-        const auto& orig{(r.scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig};
+        const auto& orig{varsForRow(r)};
         if (r.varIndex < 0 || r.varIndex >= static_cast<int>(orig.size()))
             return std::nullopt;
 
@@ -310,10 +320,21 @@ namespace ui
         if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size()))
             return {};
         const Row& r{m_rows[static_cast<size_t>(m_selected)]};
-        const auto& orig{(r.scope == Environ::core::Scope::User) ? m_userOrig : m_machineOrig};
+        const auto& orig{varsForRow(r)};
         if (r.varIndex < 0 || r.varIndex >= static_cast<int>(orig.size()))
             return {};
         return orig[static_cast<size_t>(r.varIndex)].name;
+    }
+
+    const std::vector<Environ::core::EnvVariable>& Grid::varsForRow(const Row& r) const
+    {
+        switch (r.group)
+        {
+        case RowGroup::Machine: return m_machineOrig;
+        case RowGroup::Process: return m_processVars;
+        case RowGroup::User:    break;
+        }
+        return m_userOrig;
     }
 
     std::wstring Grid::SelectedValueText() const
@@ -368,6 +389,7 @@ namespace ui
         // variable row holds the name (and the first entry), segment rows hold the rest.
         for (size_t i{0}; i < m_rows.size();)
         {
+            if (m_rows[i].group == RowGroup::Process) { ++i; continue; } // never written
             if (m_rows[i].scope != scope) { ++i; continue; }
             const int vi{m_rows[i].varIndex};
 
@@ -793,6 +815,7 @@ namespace ui
         Row entry{};
         entry.kind = Row::Kind::Segment;
         entry.depth = 1;
+        entry.group = m_rows[static_cast<size_t>(m_selected)].group;
         entry.scope = scope;
         entry.varIndex = vi;
         m_rows.insert(m_rows.begin() + m_selected + 1, entry);
@@ -875,6 +898,7 @@ namespace ui
         var.kind = Row::Kind::Variable;
         var.depth = 0;
         var.readOnly = false;
+        var.group = (scope == Environ::core::Scope::User) ? RowGroup::User : RowGroup::Machine;
         var.scope = scope;
         var.varIndex = -1; // sentinel: new variable
         var.segIndex = -1;
@@ -1057,7 +1081,8 @@ namespace ui
             const bool focused = (i == m_selected);
             const bool hovered = (i == m_hover && !selected);
             const std::vector<bool>& sf{(r.scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
-            const bool varStruct{r.varIndex >= 0 && r.varIndex < static_cast<int>(sf.size())
+            const bool varStruct{r.group != RowGroup::Process && r.varIndex >= 0
+                                 && r.varIndex < static_cast<int>(sf.size())
                                  && sf[static_cast<size_t>(r.varIndex)]};
             const bool valueDirty = (r.col2 != r.original) || varStruct;
             const bool nameDirty = (r.kind == Row::Kind::Variable && r.col1 != r.col1Original);

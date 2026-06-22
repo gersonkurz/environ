@@ -104,6 +104,7 @@ private:
     // Data counts for footer
     size_t m_userCount{0};
     size_t m_machineCount{0};
+    size_t m_processCount{0};
     bool   m_elevated{false};
 };
 

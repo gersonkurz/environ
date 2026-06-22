@@ -31,6 +31,7 @@ namespace ui
     public:
         void SetData(const std::vector<Environ::core::EnvVariable>& userVars,
                      const std::vector<Environ::core::EnvVariable>& machineVars,
+                     const std::vector<Environ::core::EnvVariable>& processVars,
                      bool elevated);
 
         // Paint within `bounds` (DIPs). `brush` is a reusable solid color brush.
@@ -142,9 +143,14 @@ namespace ui
             bool elevated);
 
     private:
+        // Display grouping (which section a row appears under). Distinct from the registry
+        // Scope: Process rows are read-only, never written, and carry no registry scope.
+        enum class RowGroup { User, Machine, Process };
+
         struct Row
         {
             enum class Kind { Variable, Segment } kind;
+            RowGroup group{RowGroup::User};
             std::wstring col1;          // variable name (Variable rows)
             std::wstring col2;          // scalar value / first-segment / segment path
             std::wstring original;      // initial col2, for value-dirty detection
@@ -178,6 +184,8 @@ namespace ui
 
         Layout Compute() const;
         void MeasureContentWidth(const GridFonts& fonts); // sets m_contentW
+        // Originals backing a row, by display group (User/Machine/Process).
+        const std::vector<Environ::core::EnvVariable>& varsForRow(const Row& r) const;
         void ClearAndSelectFocus();
         float NameColWidth() const;
         D2D1_RECT_F ValueCellRect(int row) const;
@@ -195,6 +203,7 @@ namespace ui
         std::vector<Row> m_rows;
         std::vector<Environ::core::EnvVariable> m_userOrig;
         std::vector<Environ::core::EnvVariable> m_machineOrig;
+        std::vector<Environ::core::EnvVariable> m_processVars; // read-only "process extras"
         // Per-variable "structurally edited" (add/remove/reorder) flags, by scope + varIndex.
         std::vector<bool> m_userStruct;
         std::vector<bool> m_machineStruct;
