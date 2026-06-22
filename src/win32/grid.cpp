@@ -7,6 +7,11 @@ namespace ui
     {
         constexpr float kPad{12.0f};
 
+        // Per-row scope icons (Segoe Fluent Icons). Invariant to sort/filter order.
+        constexpr wchar_t kGlyphUser{0xE77B};    // Contact (person)
+        constexpr wchar_t kGlyphMachine{0xEC76}; // Devices (this PC)
+        constexpr wchar_t kGlyphProcess{0xE72E}; // Lock (read-only / set by Windows)
+
         bool Contains(const D2D1_RECT_F& r, float x, float y)
         {
             return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
@@ -1136,8 +1141,21 @@ namespace ui
             if (r.kind == Row::Kind::Variable || promoted != m_filteredPromoted.end())
             {
                 const std::wstring& name{promoted != m_filteredPromoted.end() ? promoted->second : r.col1};
+
+                // Per-row scope icon (survives any sort/filter); takes the row's text color so
+                // read-only rows grey out with it.
+                const float iconW{18.0f * m_zoom};
+                if (fonts.glyph)
+                {
+                    const wchar_t g{r.group == RowGroup::Process ? kGlyphProcess
+                                    : r.group == RowGroup::Machine ? kGlyphMachine
+                                                                   : kGlyphUser};
+                    DrawString(rt, brush, std::wstring(1, g), fonts.glyph,
+                               D2D1::RectF(rowRect.left + kPad, y, rowRect.left + kPad + iconW, y + m_rowH),
+                               nameColor);
+                }
                 DrawString(rt, brush, name, fonts.name,
-                         D2D1::RectF(rowRect.left + kPad, y, rowRect.left + nameCol, y + m_rowH), nameColor);
+                         D2D1::RectF(rowRect.left + kPad + iconW, y, rowRect.left + nameCol, y + m_rowH), nameColor);
                 drawValue(r.col2, y, valueColor);
             }
             else

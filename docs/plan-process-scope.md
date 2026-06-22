@@ -1,6 +1,23 @@
 # Plan — Process (read-only) variables, scope visibility & Explorer integration
 
-Status: **proposed** (awaiting review). Author: implementation pass after the v1.0.0 cleanup.
+Status: **in progress.** Step #1.1/#1.2 landed (commit 02ffe43); section headers reverted — see
+the direction change below.
+
+## Direction change (after step #1 verification) — for reviewers
+
+We dropped **section headers** as the scope cue in favour of a **per-row scope icon**. Rationale:
+a section header is a *structural* cue that only holds when rows are physically grouped in scope
+order — and that grouping is destroyed by the two things we want. **Filtering** produces a flat
+result set, so headers have nothing coherent to bracket (they vanish). **Global sorting** (e.g.
+alphabetical across everything) interleaves scopes, so sections and a single sort order are
+mutually exclusive. A **per-row indicator is invariant** to order and filtering: every row
+self-identifies its scope (person = User, PC = Machine, lock = Process/read-only), so it survives
+any sort, filter, or scroll position. The committed read-only **Process group (1.2) stays**; the
+uncommitted **section-header work (1.3) was reverted**. This **promotes plan step #3 (per-row
+glyphs) from a complement to the primary mechanism**, and makes alphabetical sorting a clean
+follow-up rather than a contradiction. Steps **#2 (Open in Explorer)**, **#4 (KB notes)**, and the
+deferred **shadow detection** are unchanged. (The §2 "section headers" and §3 "glyphs as
+complement" text below is superseded by this note.)
 
 ## Problem
 

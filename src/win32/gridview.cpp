@@ -157,7 +157,9 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
         PositionSearchEdit(ctx, bounds);
     }
 
-    m_grid.Paint(ctx.rt, ctx.brush, GridFonts{ctx.fmtName, ctx.fmtValue, ctx.fmtHeader, ctx.dwrite}, s, gridBounds);
+    m_grid.Paint(ctx.rt, ctx.brush,
+                 GridFonts{ctx.fmtName, ctx.fmtValue, ctx.fmtHeader, ctx.dwrite, ctx.fmtGlyph},
+                 s, gridBounds);
 
     // Detail strip: expanded path / validity / duplicate info for the selected row.
     if (const auto detail{m_grid.GetSelectionDetail()})

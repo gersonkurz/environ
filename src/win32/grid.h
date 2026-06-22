@@ -24,6 +24,7 @@ namespace ui
         IDWriteTextFormat* value;  // value / segment path (regular)
         IDWriteTextFormat* header; // column header
         IDWriteFactory*    factory{nullptr}; // for measuring value widths (h-scroll extent)
+        IDWriteTextFormat* glyph{nullptr};   // Segoe Fluent Icons, for per-row scope icons
     };
 
     class Grid
