@@ -61,8 +61,12 @@ public:
     void RefreshEditBrush();
     void RefreshEditFont(const ViewContext& ctx);
 
-    // Data count update (e.g. after snapshot restore)
-    void SetCounts(size_t userCount, size_t machineCount) { m_userCount = userCount; m_machineCount = machineCount; }
+    // Data count update (e.g. after snapshot restore / import). Process rows aren't shown in
+    // those views, so processCount defaults to 0 — resetting any stale count from a prior load.
+    void SetCounts(size_t userCount, size_t machineCount, size_t processCount = 0)
+    {
+        m_userCount = userCount; m_machineCount = machineCount; m_processCount = processCount;
+    }
 
     // Where learned classifications are persisted (%LOCALAPPDATA%\environ\knowledge.toml).
     void SetUserKnowledgePath(const std::wstring& path) { m_userKnowledgePath = path; }

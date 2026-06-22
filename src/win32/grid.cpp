@@ -43,6 +43,7 @@ namespace ui
         m_userStruct.assign(userVars.size(), false);
         m_machineStruct.assign(machineVars.size(), false);
         m_rows.clear();
+        m_nextUnit = 0;
         m_scrollY = 0.0f;
         m_scrollX = 0.0f;
         m_needMeasure = true;
@@ -57,6 +58,7 @@ namespace ui
             for (int vi{0}; vi < static_cast<int>(vars.size()); ++vi)
             {
                 const EnvVariable& v{vars[static_cast<size_t>(vi)]};
+                const int unit{m_nextUnit++};
                 Row var{};
                 var.kind = Row::Kind::Variable;
                 var.group = group;
@@ -66,6 +68,7 @@ namespace ui
                 var.readOnly = readOnly;
                 var.scope = scope;
                 var.varIndex = vi;
+                var.unit = unit;
 
                 if (v.kind == EnvVariableKind::PathList && !v.segments.empty())
                 {
@@ -88,6 +91,7 @@ namespace ui
                         seg.scope = scope;
                         seg.varIndex = vi;
                         seg.segIndex = static_cast<int>(i);
+                        seg.unit = unit;
                         seg.invalid = (i < v.segment_valid.size()) && !v.segment_valid[i];
                         seg.duplicate = (i < v.segment_duplicate.size()) && !v.segment_duplicate[i].empty();
                         m_rows.push_back(std::move(seg));
@@ -127,6 +131,7 @@ namespace ui
         m_userOrig = currentUser;
         m_machineOrig = currentMachine;
         m_rows.clear();
+        m_nextUnit = 0;
         m_scrollY = 0.0f;
         m_scrollX = 0.0f;
         m_needMeasure = true;
@@ -170,6 +175,7 @@ namespace ui
                 const int origIdx{it != curMap.end() ? it->second : -1};
                 if (origIdx >= 0) seen[static_cast<size_t>(origIdx)] = true;
 
+                const int unit{m_nextUnit++};
                 Row var{};
                 var.kind = Row::Kind::Variable;
                 var.col1 = sv.name;
@@ -180,6 +186,7 @@ namespace ui
                 var.scope = scope;
                 var.varIndex = origIdx; // -1 if new in snapshot (absent from registry)
                 var.segIndex = -1;
+                var.unit = unit;
 
                 if (sv.kind == EnvVariableKind::PathList && !sv.segments.empty())
                 {
@@ -208,6 +215,7 @@ namespace ui
                         seg.scope = scope;
                         seg.varIndex = origIdx;
                         seg.segIndex = static_cast<int>(i);
+                        seg.unit = unit;
 
                         if (origIdx >= 0 && curVars[static_cast<size_t>(origIdx)].kind == EnvVariableKind::PathList
                             && i < curVars[static_cast<size_t>(origIdx)].segments.size())
@@ -414,14 +422,14 @@ namespace ui
         {
             if (m_rows[i].group == RowGroup::Process) { ++i; continue; } // never written
             if (m_rows[i].scope != scope) { ++i; continue; }
-            const RowGroup grp{m_rows[i].group}; // unit identity is group + varIndex
+            const int unit{m_rows[i].unit}; // a variable's rows share a stable unit id
             const int vi{m_rows[i].varIndex};
 
             std::wstring name;
             std::wstring nameOriginal;
             std::vector<std::wstring> entries;
             size_t j{i};
-            for (; j < m_rows.size() && m_rows[j].group == grp && m_rows[j].varIndex == vi; ++j)
+            for (; j < m_rows.size() && m_rows[j].unit == unit; ++j)
             {
                 if (m_rows[j].kind == Row::Kind::Variable)
                 {
@@ -535,13 +543,13 @@ namespace ui
         // Walk rows grouped by variable (contiguous runs sharing scope + varIndex).
         for (size_t i{0}; i < m_rows.size();)
         {
-            const auto grp{m_rows[i].group}; // unit identity is group + varIndex
+            const int unit{m_rows[i].unit}; // a variable's rows share a stable unit id
             const int vi{m_rows[i].varIndex};
 
             // Collect the contiguous group.
             const size_t groupStart{i};
             size_t groupEnd{i};
-            while (groupEnd < m_rows.size() && m_rows[groupEnd].group == grp && m_rows[groupEnd].varIndex == vi)
+            while (groupEnd < m_rows.size() && m_rows[groupEnd].unit == unit)
                 ++groupEnd;
 
             // Always include all rows of new variables (varIndex == -1).
@@ -705,29 +713,24 @@ namespace ui
     {
         if (m_rows.empty()) { RebuildFiltered(); return; }
 
-        // Remember the focused row's identity (group + varIndex + segIndex) so it stays
-        // selected after the reorder. Multi-selection across a re-sort collapses to focus.
+        // Remember the focused row's identity (unit + segIndex) so it stays selected after
+        // the reorder. Multi-selection across a re-sort collapses to focus.
         const bool hadSel{m_selected >= 0 && m_selected < static_cast<int>(m_rows.size())};
-        RowGroup selGroup{RowGroup::User};
-        int selVar{-1}, selSeg{-1};
-        std::wstring selName; // disambiguates unsaved (varIndex == -1) rows
+        int selUnit{-1}, selSeg{-1};
         if (hadSel)
         {
             const Row& r{m_rows[static_cast<size_t>(m_selected)]};
-            selGroup = r.group; selVar = r.varIndex; selSeg = r.segIndex; selName = r.col1;
+            selUnit = r.unit; selSeg = r.segIndex;
         }
 
-        // Split rows into variable units: a Variable row plus its trailing Segment rows.
-        // A unit is a contiguous run sharing group + varIndex; unsaved rows (varIndex == -1)
-        // are always singletons (they never own segment rows).
+        // Split rows into variable units: a Variable row plus its trailing Segment rows,
+        // i.e. a contiguous run sharing Row::unit (a stable per-variable id).
         std::vector<std::pair<size_t, size_t>> units;
         for (size_t i{0}; i < m_rows.size();)
         {
             size_t j{i + 1};
-            if (m_rows[i].varIndex != -1)
-                while (j < m_rows.size() && m_rows[j].group == m_rows[i].group
-                       && m_rows[j].varIndex == m_rows[i].varIndex)
-                    ++j;
+            while (j < m_rows.size() && m_rows[j].unit == m_rows[i].unit)
+                ++j;
             units.push_back({i, j});
             i = j;
         }
@@ -758,16 +761,14 @@ namespace ui
                 sorted.push_back(std::move(m_rows[k]));
         m_rows = std::move(sorted);
 
-        // Restore focus by identity.
+        // Restore focus by identity (unit + segIndex uniquely identify a row).
         m_selected = -1;
         if (hadSel)
         {
             for (size_t i{0}; i < m_rows.size(); ++i)
             {
                 const Row& r{m_rows[i]};
-                const bool match{r.group == selGroup && r.varIndex == selVar && r.segIndex == selSeg
-                                 && (selVar != -1 || r.col1 == selName)};
-                if (match) { m_selected = static_cast<int>(i); break; }
+                if (r.unit == selUnit && r.segIndex == selSeg) { m_selected = static_cast<int>(i); break; }
             }
         }
         m_selection.clear();
@@ -918,6 +919,7 @@ namespace ui
         entry.group = m_rows[static_cast<size_t>(m_selected)].group;
         entry.scope = scope;
         entry.varIndex = vi;
+        entry.unit = m_rows[static_cast<size_t>(m_selected)].unit; // same variable unit
         m_rows.insert(m_rows.begin() + m_selected + 1, entry);
         m_selected += 1; // select the new (blank) entry so the host can edit it
         ClearAndSelectFocus();
@@ -935,7 +937,7 @@ namespace ui
         const Environ::core::Scope scope{m_rows[static_cast<size_t>(m_selected)].scope};
         const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
 
-        const RowGroup grp{m_rows[static_cast<size_t>(m_selected)].group};
+        const int unit{m_rows[static_cast<size_t>(m_selected)].unit};
         if (m_rows[static_cast<size_t>(m_selected)].kind == Row::Kind::Segment)
         {
             m_rows.erase(m_rows.begin() + m_selected);
@@ -946,7 +948,7 @@ namespace ui
             // Variable row holds the first entry (and the name): promote the next entry into it,
             // or blank it if this was the last entry.
             const size_t next{static_cast<size_t>(m_selected) + 1};
-            if (next < m_rows.size() && m_rows[next].group == grp && m_rows[next].varIndex == vi
+            if (next < m_rows.size() && m_rows[next].unit == unit
                 && m_rows[next].kind == Row::Kind::Segment)
             {
                 m_rows[static_cast<size_t>(m_selected)].col2 = m_rows[next].col2;
@@ -981,9 +983,9 @@ namespace ui
         int insertAt{0};
         if (HasSelection() && m_rows[static_cast<size_t>(m_selected)].group == targetGroup)
         {
-            const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
+            const int unit{m_rows[static_cast<size_t>(m_selected)].unit};
             size_t j{static_cast<size_t>(m_selected)};
-            while (j + 1 < m_rows.size() && m_rows[j + 1].group == targetGroup && m_rows[j + 1].varIndex == vi)
+            while (j + 1 < m_rows.size() && m_rows[j + 1].unit == unit)
                 ++j;
             insertAt = static_cast<int>(j) + 1;
         }
@@ -1004,6 +1006,7 @@ namespace ui
         var.scope = scope;
         var.varIndex = -1; // sentinel: new variable
         var.segIndex = -1;
+        var.unit = m_nextUnit++; // fresh, unique unit id
         m_rows.insert(m_rows.begin() + insertAt, std::move(var));
         m_selected = insertAt;
         ClearAndSelectFocus();
@@ -1019,28 +1022,24 @@ namespace ui
         if (sel.readOnly) return false;
 
         const Environ::core::Scope scope{sel.scope};
-        const RowGroup grp{sel.group};
+        const int unit{sel.unit};
         const int vi{sel.varIndex};
 
-        if (vi == -1)
+        // For an existing variable, flag it for deletion; new (unsaved) variables just vanish.
+        if (vi >= 0)
         {
-            // New, unsaved variable: just erase the single row.
-            m_rows.erase(m_rows.begin() + m_selected);
-        }
-        else
-        {
-            // Existing variable: erase ALL rows with this group+varIndex.
             std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
-            if (vi >= 0 && vi < static_cast<int>(flags.size()))
+            if (vi < static_cast<int>(flags.size()))
                 flags[static_cast<size_t>(vi)] = true;
+        }
 
-            for (auto it{m_rows.begin()}; it != m_rows.end();)
-            {
-                if (it->group == grp && it->varIndex == vi)
-                    it = m_rows.erase(it);
-                else
-                    ++it;
-            }
+        // Erase ALL rows of the unit (variable row + any segment rows).
+        for (auto it{m_rows.begin()}; it != m_rows.end();)
+        {
+            if (it->unit == unit)
+                it = m_rows.erase(it);
+            else
+                ++it;
         }
 
         if (m_selected >= static_cast<int>(m_rows.size()))
@@ -1057,10 +1056,8 @@ namespace ui
         const int other{m_selected + dir};
         if (other < 0 || other >= static_cast<int>(m_rows.size())) return false;
         const Environ::core::Scope scope{m_rows[static_cast<size_t>(m_selected)].scope};
-        const RowGroup grp{m_rows[static_cast<size_t>(m_selected)].group};
         const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
-        if (m_rows[static_cast<size_t>(other)].group != grp
-            || m_rows[static_cast<size_t>(other)].varIndex != vi)
+        if (m_rows[static_cast<size_t>(other)].unit != m_rows[static_cast<size_t>(m_selected)].unit)
             return false; // can't move across variables
 
         std::swap(m_rows[static_cast<size_t>(m_selected)].col2, m_rows[static_cast<size_t>(other)].col2);
@@ -1365,7 +1362,7 @@ namespace ui
                     const int ni{sel[j]};
                     if (ni < 0 || ni >= static_cast<int>(m_rows.size())) break;
                     const Row& nr{m_rows[static_cast<size_t>(ni)]};
-                    if (nr.group != r.group || nr.varIndex != r.varIndex) break;
+                    if (nr.unit != r.unit) break;
                     entries.push_back(nr.col2);
                     ++j;
                 }

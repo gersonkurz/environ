@@ -152,8 +152,9 @@ namespace ui
     private:
         // Display grouping (which section a row appears under). Distinct from the registry
         // Scope: Process rows are read-only, never written, and carry no registry scope.
-        // (Process rows carry a dummy scope = User, so a variable "unit" is identified by
-        // group + varIndex, never scope + varIndex — see ApplySort and the run-detection.)
+        // A variable "unit" (a Variable row plus its path-segment rows) is identified by a
+        // stable per-unit id (Row::unit), NOT by scope/group + varIndex: Process rows carry a
+        // dummy scope = User, and unsaved rows share varIndex == -1, so neither is a safe key.
         enum class RowGroup { User, Machine, Process };
 
         // Active global sort: rows from all groups merge into one list ordered by this
@@ -174,8 +175,9 @@ namespace ui
             bool duplicate;             // segment duplicated elsewhere
             // Back-references into the originals for save reconstruction:
             Environ::core::Scope scope; // which scope this row belongs to
-            int varIndex;               // index into that scope's original vector
+            int varIndex;               // index into that scope's original vector (-1 = unsaved)
             int segIndex;               // path-list segment index (-1 for a scalar value)
+            int unit{-1};               // stable display-unit id: all rows of one variable share it
         };
 
         struct Layout
@@ -243,6 +245,9 @@ namespace ui
         // Sort state (persists across reloads so a chosen order survives save/restore).
         SortColumn m_sortColumn{SortColumn::Name};
         bool       m_sortAscending{true};
+
+        // Monotonic source of stable per-variable unit ids; reset when rows are rebuilt.
+        int m_nextUnit{0};
 
         // Filter state
         std::wstring     m_filterText;          // lowercased, for comparison

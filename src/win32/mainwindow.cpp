@@ -677,24 +677,33 @@ void ui::MainWindow::PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F&
 
     m_rt->PushAxisAlignedClip(g.list, D2D1_ANTIALIAS_MODE_ALIASED);
     float y{g.list.top};
-    const auto group = [&](const wchar_t* label, const std::vector<Environ::core::EnvChange>& changes) {
+    // Is the original row behind this change actually shadowed (effective value overridden
+    // by Windows)? Use the real per-row flag — not just a volatile-name match — so we don't
+    // warn on cases the shadow rule deliberately excludes (e.g. an expanded-match value).
+    const auto isShadowed = [&](Environ::core::Scope scope, const std::wstring& name) {
+        for (const auto& v : m_grid.OriginalVars(scope))
+            if (_wcsicmp(v.name.c_str(), name.c_str()) == 0) return v.shadowed;
+        return false;
+    };
+    const auto group = [&](const wchar_t* label, const std::vector<Environ::core::EnvChange>& changes,
+                           Environ::core::Scope scope) {
         if (changes.empty()) return;
         DrawString(label, m_fmtHeader.get(), D2D1::RectF(g.list.left, y, g.list.right, y + 22.0f), s.headerSubtext);
         y += 22.0f;
         for (const Environ::core::EnvChange& c : changes)
         {
-            // Annotate edits to Windows-computed vars: the write succeeds but the sign-in
-            // value will override it, so the change won't take effect.
+            // A shadowed var's persistent write succeeds but Windows overrides it at sign-in.
             std::wstring line{L"    " + c.describe()};
-            if (m_knowledge.is_volatile(c.name))
-                line += L"  \x2014 won't take effect (set by Windows at sign-in)";
+            const std::wstring& origName{c.old_name.empty() ? c.name : c.old_name};
+            if (isShadowed(scope, origName))
+                line += L"  \x2014 overridden by Windows at sign-in (won't take effect)";
             DrawString(line, m_fmtValue.get(),
                        D2D1::RectF(g.list.left, y, g.list.right, y + 22.0f), s.headerText);
             y += 22.0f;
         }
     };
-    group(L"USER", m_reviewUser);
-    group(L"MACHINE", m_reviewMachine);
+    group(L"USER", m_reviewUser, Environ::core::Scope::User);
+    group(L"MACHINE", m_reviewMachine, Environ::core::Scope::Machine);
     m_rt->PopAxisAlignedClip();
 
     DrawReviewButton(g.cancelBtn, L"Cancel", false, m_reviewHover == 0, s);

@@ -126,12 +126,20 @@ bool KnowledgeBase::has_learned() const {
 bool KnowledgeBase::save_learned(std::string const& path) {
     if (!has_learned()) return true;
 
-    // Preserve any existing user-file content; start fresh if absent or unparseable.
+    const std::filesystem::path fp{pnq::unicode::to_utf16(path)};
+
+    // Preserve existing user-file content. Start fresh only when the file is ABSENT; if it
+    // exists but fails to parse, do NOT overwrite it (that would destroy the user's notes /
+    // classifications) — log, keep the learned queue, and retry on a later run.
     toml::table root;
-    try {
-        root = toml::parse_file(path);
-    } catch (const toml::parse_error&) {
-        root = toml::table{};
+    std::error_code existsEc;
+    if (std::filesystem::exists(fp, existsEc)) {
+        try {
+            root = toml::parse_file(path);
+        } catch (const toml::parse_error& err) {
+            spdlog::error("Not overwriting unparseable knowledge file {}: {}", path, err.what());
+            return false; // learned queue preserved for a future attempt
+        }
     }
 
     if (!root.contains("classification") || !root["classification"].is_table())
@@ -158,7 +166,6 @@ bool KnowledgeBase::save_learned(std::string const& path) {
     merge("file", m_learned_files);
     merge("path_like", m_learned_path);
 
-    const std::filesystem::path fp{pnq::unicode::to_utf16(path)};
     std::error_code ec;
     if (fp.has_parent_path())
         std::filesystem::create_directories(fp.parent_path(), ec);
