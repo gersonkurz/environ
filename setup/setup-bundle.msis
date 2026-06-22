@@ -6,7 +6,7 @@
 <setup>
   <!-- Product identification -->
   <set name="PRODUCT_NAME" value="environ"/>
-  <set name="PRODUCT_VERSION" value="1.0.0"/>
+  <set name="PRODUCT_VERSION" value="1.1.0"/>
   <set name="MANUFACTURER" value="https://github.com/gersonkurz/environ"/>
   <set name="UPGRADE_CODE" value="{36F9C006-E335-4127-8515-1E42FB574C8B}"/>
 

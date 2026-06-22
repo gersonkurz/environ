@@ -2,7 +2,7 @@
 <setup>
     <!-- Setup script uses MSIS - see https://github.com/gersonkurz/msis -->
     <set name="PRODUCT_NAME" value="environ ARM64"/>
-    <set name="PRODUCT_VERSION" value="1.0.0"/>
+    <set name="PRODUCT_VERSION" value="1.1.0"/>
     <set name="LANGUAGE" value="en-us"/>
     <set name="PLATFORM" value="arm64"/>
     <set name="REPAIR_ENABLED" value="True"/>
