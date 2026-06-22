@@ -187,8 +187,18 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
                  GridFonts{ctx.fmtName, ctx.fmtValue, ctx.fmtHeader, ctx.dwrite, ctx.fmtGlyph},
                  s, gridBounds);
 
-    // Detail strip: expanded path / validity / duplicate info for the selected row.
-    if (const auto detail{m_grid.GetSelectionDetail()})
+    // Detail strip. A shadowed persistent var takes top priority: its effective value is
+    // overridden by Windows at sign-in, so editing it won't change what's in effect. Shown
+    // regardless of edit state (the row stays editable), so the warning is visible while editing.
+    if (m_grid.SelectionShadowed())
+    {
+        const std::wstring text{L"\x2139 Not in effect \x2014 Windows uses: " + m_grid.SelectionEffectiveValue()};
+        ui::DrawString(ctx, text, ctx.fmtSub,
+                       D2D1::RectF(bounds.left, bounds.bottom - detailH, bounds.right, bounds.bottom),
+                       s.rowInvalid.text);
+    }
+    // Otherwise: expanded path / validity / duplicate info for the selected row.
+    else if (const auto detail{m_grid.GetSelectionDetail()})
     {
         std::wstring text;
         D2D1_COLOR_F color{s.headerSubtext};
@@ -417,6 +427,7 @@ void ui::GridView::LoadData(bool elevated)
     expand_and_validate(machineVars);
     expand_and_validate(processVars);
     detect_duplicates(userVars, machineVars);
+    detect_shadowed(userVars, machineVars, m_knowledge); // flag persistent vars Windows overrides
 
     m_userCount = userVars.size();
     m_machineCount = machineVars.size();

@@ -365,6 +365,51 @@ void detect_duplicates(std::vector<EnvVariable>& user_vars,
     }
 }
 
+void detect_shadowed(std::vector<EnvVariable>& user_vars,
+                     std::vector<EnvVariable>& machine_vars,
+                     const KnowledgeBase& kb) {
+    // Snapshot the effective process environment: lowercased name -> value.
+    std::unordered_map<std::wstring, std::wstring> effective;
+    if (LPWCH block{GetEnvironmentStringsW()}) {
+        for (LPWCH p{block}; *p; p += wcslen(p) + 1) {
+            std::wstring entry{p};
+            if (entry.front() == L'=') continue; // "=C:=..." per-drive working-dir entries
+            const auto eq{entry.find(L'=')};
+            if (eq == std::wstring::npos || eq == 0) continue;
+            std::wstring key{entry.substr(0, eq)};
+            std::ranges::transform(key, key.begin(), ::towlower);
+            effective.emplace(std::move(key), entry.substr(eq + 1));
+        }
+        FreeEnvironmentStringsW(block);
+    }
+
+    const auto mark = [&](std::vector<EnvVariable>& vars) {
+        for (auto& v : vars) {
+            v.shadowed = false;
+            v.effective_value.clear();
+
+            // Only KB-curated volatile/system-computed scalars are shadow-eligible. Composed
+            // path-lists (Path, PSModulePath) and ordinary variables are never flagged.
+            if (v.kind != EnvVariableKind::Scalar) continue;
+            if (!kb.is_volatile(v.name)) continue;
+
+            std::wstring key{v.name};
+            std::ranges::transform(key, key.begin(), ::towlower);
+            const auto it{effective.find(key)};
+            if (it == effective.end()) continue;
+
+            // Compare the EXPANDED persistent value, so a REG_EXPAND_SZ that expands to the
+            // effective value (or a case-only difference) is not a false positive.
+            if (_wcsicmp(v.expanded_value.c_str(), it->second.c_str()) != 0) {
+                v.shadowed = true;
+                v.effective_value = it->second;
+            }
+        }
+    };
+    mark(user_vars);
+    mark(machine_vars);
+}
+
 std::wstring join_segments(std::vector<std::wstring> const& segments) {
     std::wstring result;
     for (std::size_t i{0}; i < segments.size(); ++i) {

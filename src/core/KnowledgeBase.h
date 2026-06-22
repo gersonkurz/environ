@@ -30,6 +30,11 @@ public:
     // read-only variable can't be edited here. Empty if none. Case-insensitive.
     std::wstring note(std::wstring const& variable_name) const;
 
+    // Whether a name is in the curated "volatile / system-computed" set — the names Windows
+    // recomputes at sign-in (USERPROFILE, ProgramFiles, ...). Only these are shadow-eligible
+    // (see detect_shadowed). Case-insensitive.
+    bool is_volatile(std::wstring const& variable_name) const;
+
     // Classification override for a variable name, or None if unlisted (case-insensitive).
     ClassHint classify_override(std::wstring const& variable_name) const;
 
@@ -60,6 +65,7 @@ private:
     std::unordered_set<std::wstring> m_force_scalar; // lowercased names
     std::unordered_set<std::wstring> m_folders;      // lowercased names
     std::unordered_set<std::wstring> m_files;        // lowercased names
+    std::unordered_set<std::wstring> m_volatile;     // lowercased; shadow-eligible names
 
     // Names learned at runtime since load (original case), pending persistence.
     std::vector<std::wstring> m_learned_folders;

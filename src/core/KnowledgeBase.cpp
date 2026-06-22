@@ -60,6 +60,7 @@ bool KnowledgeBase::load(std::string const& path) {
             ingest(classification["scalar"], m_force_scalar, m_force_path);
             ingest(classification["folder"], m_folders, m_files);
             ingest(classification["file"], m_files, m_folders);
+            ingest(classification["volatile"], m_volatile, m_volatile); // single axis
         }
 
         spdlog::info("Knowledge from {}: {} descriptions, {} path / {} scalar, {} folder / {} file",
@@ -198,6 +199,12 @@ std::wstring KnowledgeBase::note(std::wstring const& variable_name) const {
         return it->second;
     }
     return {};
+}
+
+bool KnowledgeBase::is_volatile(std::wstring const& variable_name) const {
+    std::wstring lower{variable_name};
+    std::ranges::transform(lower, lower.begin(), ::towlower);
+    return m_volatile.contains(lower);
 }
 
 } // namespace Environ::core

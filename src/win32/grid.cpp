@@ -331,6 +331,24 @@ namespace ui
         return orig[static_cast<size_t>(r.varIndex)].name;
     }
 
+    bool Grid::SelectionShadowed() const
+    {
+        if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size())) return false;
+        const Row& r{m_rows[static_cast<size_t>(m_selected)]};
+        const auto& orig{varsForRow(r)};
+        return r.varIndex >= 0 && r.varIndex < static_cast<int>(orig.size())
+            && orig[static_cast<size_t>(r.varIndex)].shadowed;
+    }
+
+    std::wstring Grid::SelectionEffectiveValue() const
+    {
+        if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size())) return {};
+        const Row& r{m_rows[static_cast<size_t>(m_selected)]};
+        const auto& orig{varsForRow(r)};
+        if (r.varIndex < 0 || r.varIndex >= static_cast<int>(orig.size())) return {};
+        return orig[static_cast<size_t>(r.varIndex)].effective_value;
+    }
+
     const std::vector<Environ::core::EnvVariable>& Grid::varsForRow(const Row& r) const
     {
         switch (r.group)

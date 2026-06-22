@@ -94,6 +94,12 @@ namespace ui
         // up a knowledge-base description for the detail strip.
         std::wstring SelectedVariableName() const;
 
+        // Shadowed selection: the selected persistent variable's effective value is overridden
+        // by Windows at sign-in (see detect_shadowed). Reported regardless of edit state so the
+        // detail strip can warn while the row is being edited. EffectiveValue is what's in effect.
+        bool SelectionShadowed() const;
+        std::wstring SelectionEffectiveValue() const;
+
         // Selected cell's current value text (col2), empty if no selection. Used to seed
         // the browse dialog.
         std::wstring SelectedValueText() const;

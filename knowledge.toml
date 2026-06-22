@@ -158,3 +158,12 @@ folder = [
     "WIX", "NSIS_HOME", "CUDA_PATH", "CUDA_HOME",
 ]
 file = ["ComSpec", "GIT_SSH", "GOOGLE_APPLICATION_CREDENTIALS"]
+# volatile / system-computed: recomputed by Windows at sign-in. If one of these also exists
+# as a persistent (User/Machine) value whose expanded form differs from what's in effect,
+# environ marks that row "shadowed" (not in effect). Composed lists (Path) are never listed.
+volatile = [
+    "USERPROFILE", "LOCALAPPDATA", "APPDATA", "HOMEDRIVE", "HOMEPATH",
+    "USERNAME", "USERDOMAIN", "LOGONSERVER",
+    "ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles", "ProgramData",
+    "SystemRoot", "windir", "SystemDrive", "PUBLIC",
+]

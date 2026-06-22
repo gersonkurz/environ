@@ -683,7 +683,12 @@ void ui::MainWindow::PaintReview(const theme::ColorScheme& s, const D2D1_SIZE_F&
         y += 22.0f;
         for (const Environ::core::EnvChange& c : changes)
         {
-            DrawString(L"    " + c.describe(), m_fmtValue.get(),
+            // Annotate edits to Windows-computed vars: the write succeeds but the sign-in
+            // value will override it, so the change won't take effect.
+            std::wstring line{L"    " + c.describe()};
+            if (m_knowledge.is_volatile(c.name))
+                line += L"  \x2014 won't take effect (set by Windows at sign-in)";
+            DrawString(line, m_fmtValue.get(),
                        D2D1::RectF(g.list.left, y, g.list.right, y + 22.0f), s.headerText);
             y += 22.0f;
         }

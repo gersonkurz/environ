@@ -67,6 +67,15 @@ void learn_classifications(KnowledgeBase& kb, std::vector<EnvVariable>& variable
 void detect_duplicates(std::vector<EnvVariable>& user_vars,
                        std::vector<EnvVariable>& machine_vars);
 
+// Flag persistent variables whose effective value is overridden by Windows at sign-in
+// ("shadowed"). A row is flagged only when ALL hold: the name is in the KB volatile set,
+// it is a Scalar (composed path-lists like Path are never flagged), and its EXPANDED value
+// differs (case-insensitively) from the live process value. Sets `shadowed` + carries the
+// `effective_value`. Requires expand_and_validate() to have run first.
+void detect_shadowed(std::vector<EnvVariable>& user_vars,
+                     std::vector<EnvVariable>& machine_vars,
+                     const KnowledgeBase& kb);
+
 // Join path-list segments back into a single ';'-separated value — the inverse of the
 // segment split performed by read_variables. Kept here so split and join stay symmetric.
 std::wstring join_segments(std::vector<std::wstring> const& segments);
