@@ -108,7 +108,7 @@ namespace ui
         // Process extras are always read-only and never written; the dummy Scope is never used
         // (Process rows are excluded from CurrentVars/diff and the struct-dirty paint guard).
         addGroup(processVars, RowGroup::Process, Scope::User, true);
-        RebuildFiltered();
+        ApplySort(); // merge the three groups into one globally-sorted list
     }
 
     void Grid::SetDataForRestore(
@@ -269,7 +269,7 @@ namespace ui
                 }
             }
         }
-        RebuildFiltered();
+        ApplySort(); // same global sort as the normal load path
     }
 
     bool Grid::HasChanges() const
@@ -396,13 +396,14 @@ namespace ui
         {
             if (m_rows[i].group == RowGroup::Process) { ++i; continue; } // never written
             if (m_rows[i].scope != scope) { ++i; continue; }
+            const RowGroup grp{m_rows[i].group}; // unit identity is group + varIndex
             const int vi{m_rows[i].varIndex};
 
             std::wstring name;
             std::wstring nameOriginal;
             std::vector<std::wstring> entries;
             size_t j{i};
-            for (; j < m_rows.size() && m_rows[j].scope == scope && m_rows[j].varIndex == vi; ++j)
+            for (; j < m_rows.size() && m_rows[j].group == grp && m_rows[j].varIndex == vi; ++j)
             {
                 if (m_rows[j].kind == Row::Kind::Variable)
                 {
@@ -516,13 +517,13 @@ namespace ui
         // Walk rows grouped by variable (contiguous runs sharing scope + varIndex).
         for (size_t i{0}; i < m_rows.size();)
         {
-            const auto scope{m_rows[i].scope};
+            const auto grp{m_rows[i].group}; // unit identity is group + varIndex
             const int vi{m_rows[i].varIndex};
 
             // Collect the contiguous group.
             const size_t groupStart{i};
             size_t groupEnd{i};
-            while (groupEnd < m_rows.size() && m_rows[groupEnd].scope == scope && m_rows[groupEnd].varIndex == vi)
+            while (groupEnd < m_rows.size() && m_rows[groupEnd].group == grp && m_rows[groupEnd].varIndex == vi)
                 ++groupEnd;
 
             // Always include all rows of new variables (varIndex == -1).
@@ -680,6 +681,82 @@ namespace ui
                                      thumbLeft + thumbW, lay.data.bottom - 1.0f);
         }
         return lay;
+    }
+
+    void Grid::ApplySort()
+    {
+        if (m_rows.empty()) { RebuildFiltered(); return; }
+
+        // Remember the focused row's identity (group + varIndex + segIndex) so it stays
+        // selected after the reorder. Multi-selection across a re-sort collapses to focus.
+        const bool hadSel{m_selected >= 0 && m_selected < static_cast<int>(m_rows.size())};
+        RowGroup selGroup{RowGroup::User};
+        int selVar{-1}, selSeg{-1};
+        std::wstring selName; // disambiguates unsaved (varIndex == -1) rows
+        if (hadSel)
+        {
+            const Row& r{m_rows[static_cast<size_t>(m_selected)]};
+            selGroup = r.group; selVar = r.varIndex; selSeg = r.segIndex; selName = r.col1;
+        }
+
+        // Split rows into variable units: a Variable row plus its trailing Segment rows.
+        // A unit is a contiguous run sharing group + varIndex; unsaved rows (varIndex == -1)
+        // are always singletons (they never own segment rows).
+        std::vector<std::pair<size_t, size_t>> units;
+        for (size_t i{0}; i < m_rows.size();)
+        {
+            size_t j{i + 1};
+            if (m_rows[i].varIndex != -1)
+                while (j < m_rows.size() && m_rows[j].group == m_rows[i].group
+                       && m_rows[j].varIndex == m_rows[i].varIndex)
+                    ++j;
+            units.push_back({i, j});
+            i = j;
+        }
+
+        // Sort key per unit: the Variable row (always the unit's first row) carries the
+        // name/value. Case-insensitive.
+        std::vector<std::wstring> keys(units.size());
+        for (size_t u{0}; u < units.size(); ++u)
+        {
+            const Row& v{m_rows[units[u].first]};
+            std::wstring k{m_sortColumn == SortColumn::Name ? v.col1 : v.col2};
+            std::ranges::transform(k, k.begin(), ::towlower);
+            keys[u] = std::move(k);
+        }
+
+        std::vector<size_t> order(units.size());
+        for (size_t i{0}; i < order.size(); ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            const int c{keys[a].compare(keys[b])};
+            if (c == 0) return false; // keep input order (stable) for equal keys
+            return m_sortAscending ? (c < 0) : (c > 0);
+        });
+
+        std::vector<Row> sorted;
+        sorted.reserve(m_rows.size());
+        for (size_t oi : order)
+            for (size_t k{units[oi].first}; k < units[oi].second; ++k)
+                sorted.push_back(std::move(m_rows[k]));
+        m_rows = std::move(sorted);
+
+        // Restore focus by identity.
+        m_selected = -1;
+        if (hadSel)
+        {
+            for (size_t i{0}; i < m_rows.size(); ++i)
+            {
+                const Row& r{m_rows[i]};
+                const bool match{r.group == selGroup && r.varIndex == selVar && r.segIndex == selSeg
+                                 && (selVar != -1 || r.col1 == selName)};
+                if (match) { m_selected = static_cast<int>(i); break; }
+            }
+        }
+        m_selection.clear();
+        if (m_selected >= 0) m_selection.insert(m_selected);
+        m_hover = -1;
+        m_editing = -1;
+        RebuildFiltered();
     }
 
     int Grid::RowAtPoint(const Layout& lay, float x, float y) const
@@ -840,6 +917,7 @@ namespace ui
         const Environ::core::Scope scope{m_rows[static_cast<size_t>(m_selected)].scope};
         const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
 
+        const RowGroup grp{m_rows[static_cast<size_t>(m_selected)].group};
         if (m_rows[static_cast<size_t>(m_selected)].kind == Row::Kind::Segment)
         {
             m_rows.erase(m_rows.begin() + m_selected);
@@ -850,7 +928,7 @@ namespace ui
             // Variable row holds the first entry (and the name): promote the next entry into it,
             // or blank it if this was the last entry.
             const size_t next{static_cast<size_t>(m_selected) + 1};
-            if (next < m_rows.size() && m_rows[next].scope == scope && m_rows[next].varIndex == vi
+            if (next < m_rows.size() && m_rows[next].group == grp && m_rows[next].varIndex == vi
                 && m_rows[next].kind == Row::Kind::Segment)
             {
                 m_rows[static_cast<size_t>(m_selected)].col2 = m_rows[next].col2;
@@ -878,23 +956,24 @@ namespace ui
         if (HasSelection() && !m_rows[static_cast<size_t>(m_selected)].readOnly)
             scope = m_rows[static_cast<size_t>(m_selected)].scope;
 
-        // Find insertion point: after the last row belonging to the same scope section.
-        // If we have a selection in that scope, insert after the selected variable's group.
+        // Find insertion point. If we have an editable selection, insert right after the
+        // selected variable's unit; otherwise append after the last row of the target group.
+        // (Use group, not scope: Process rows carry a dummy scope = User.)
+        const RowGroup targetGroup{scope == Environ::core::Scope::User ? RowGroup::User : RowGroup::Machine};
         int insertAt{0};
-        if (HasSelection() && m_rows[static_cast<size_t>(m_selected)].scope == scope)
+        if (HasSelection() && m_rows[static_cast<size_t>(m_selected)].group == targetGroup)
         {
             const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
             size_t j{static_cast<size_t>(m_selected)};
-            while (j + 1 < m_rows.size() && m_rows[j + 1].scope == scope && m_rows[j + 1].varIndex == vi)
+            while (j + 1 < m_rows.size() && m_rows[j + 1].group == targetGroup && m_rows[j + 1].varIndex == vi)
                 ++j;
             insertAt = static_cast<int>(j) + 1;
         }
         else
         {
-            // Append at the end of the scope's section.
             for (size_t i{0}; i < m_rows.size(); ++i)
             {
-                if (m_rows[i].scope == scope)
+                if (m_rows[i].group == targetGroup)
                     insertAt = static_cast<int>(i) + 1;
             }
         }
@@ -922,6 +1001,7 @@ namespace ui
         if (sel.readOnly) return false;
 
         const Environ::core::Scope scope{sel.scope};
+        const RowGroup grp{sel.group};
         const int vi{sel.varIndex};
 
         if (vi == -1)
@@ -931,14 +1011,14 @@ namespace ui
         }
         else
         {
-            // Existing variable: erase ALL rows with this scope+varIndex.
+            // Existing variable: erase ALL rows with this group+varIndex.
             std::vector<bool>& flags{(scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
             if (vi >= 0 && vi < static_cast<int>(flags.size()))
                 flags[static_cast<size_t>(vi)] = true;
 
             for (auto it{m_rows.begin()}; it != m_rows.end();)
             {
-                if (it->scope == scope && it->varIndex == vi)
+                if (it->group == grp && it->varIndex == vi)
                     it = m_rows.erase(it);
                 else
                     ++it;
@@ -959,8 +1039,9 @@ namespace ui
         const int other{m_selected + dir};
         if (other < 0 || other >= static_cast<int>(m_rows.size())) return false;
         const Environ::core::Scope scope{m_rows[static_cast<size_t>(m_selected)].scope};
+        const RowGroup grp{m_rows[static_cast<size_t>(m_selected)].group};
         const int vi{m_rows[static_cast<size_t>(m_selected)].varIndex};
-        if (m_rows[static_cast<size_t>(other)].scope != scope
+        if (m_rows[static_cast<size_t>(other)].group != grp
             || m_rows[static_cast<size_t>(other)].varIndex != vi)
             return false; // can't move across variables
 
@@ -1055,13 +1136,18 @@ namespace ui
             rt->PopAxisAlignedClip();
         };
 
-        // Column header band.
+        // Column header band. The active sort column shows an ascending/descending arrow.
         brush->SetColor(s.header.fill);
         rt->FillRectangle(lay.header, brush);
-        DrawString(rt, brush, L"NAME", fonts.header,
+        const wchar_t arrow{m_sortAscending ? L'\x25B2' : L'\x25BC'}; // ▲ / ▼
+        std::wstring nameLabel{L"NAME"};
+        std::wstring valueLabel{L"VALUE"};
+        if (m_sortColumn == SortColumn::Name) nameLabel += std::wstring{L"  "} + arrow;
+        else                                  valueLabel += std::wstring{L"  "} + arrow;
+        DrawString(rt, brush, nameLabel, fonts.header,
                  D2D1::RectF(lay.header.left + kPad, lay.header.top, lay.header.left + nameCol, lay.header.bottom),
                  s.header.text);
-        DrawString(rt, brush, L"VALUE", fonts.header,
+        DrawString(rt, brush, valueLabel, fonts.header,
                  D2D1::RectF(lay.header.left + kPad + nameCol, lay.header.top, lay.header.right, lay.header.bottom),
                  s.header.text);
         if (s.header.borderWidth > 0.0f)
@@ -1261,7 +1347,7 @@ namespace ui
                     const int ni{sel[j]};
                     if (ni < 0 || ni >= static_cast<int>(m_rows.size())) break;
                     const Row& nr{m_rows[static_cast<size_t>(ni)]};
-                    if (nr.scope != r.scope || nr.varIndex != r.varIndex) break;
+                    if (nr.group != r.group || nr.varIndex != r.varIndex) break;
                     entries.push_back(nr.col2);
                     ++j;
                 }
@@ -1286,6 +1372,18 @@ namespace ui
     bool Grid::OnLButtonDown(float x, float y, bool shift, bool ctrl)
     {
         const Layout lay{Compute()};
+
+        // Column-header click: sort by that column; clicking the active column flips order.
+        if (Contains(lay.header, x, y))
+        {
+            const SortColumn col{(x < lay.valueLeft) ? SortColumn::Name : SortColumn::Value};
+            if (col == m_sortColumn) m_sortAscending = !m_sortAscending;
+            else { m_sortColumn = col; m_sortAscending = true; }
+            ApplySort();
+            if (m_selected >= 0) EnsureVisible(m_selected);
+            return true;
+        }
+
         if (lay.hasScrollbar && Contains(lay.thumb, x, y))
         {
             m_draggingThumb = true;

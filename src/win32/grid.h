@@ -146,7 +146,13 @@ namespace ui
     private:
         // Display grouping (which section a row appears under). Distinct from the registry
         // Scope: Process rows are read-only, never written, and carry no registry scope.
+        // (Process rows carry a dummy scope = User, so a variable "unit" is identified by
+        // group + varIndex, never scope + varIndex — see ApplySort and the run-detection.)
         enum class RowGroup { User, Machine, Process };
+
+        // Active global sort: rows from all groups merge into one list ordered by this
+        // column/direction; the per-row scope glyph disambiguates origin.
+        enum class SortColumn { Name, Value };
 
         struct Row
         {
@@ -184,6 +190,7 @@ namespace ui
         };
 
         Layout Compute() const;
+        void ApplySort(); // reorder m_rows into the active global sort (preserves selection)
         void MeasureContentWidth(const GridFonts& fonts); // sets m_contentW
         // Originals backing a row, by display group (User/Machine/Process).
         const std::vector<Environ::core::EnvVariable>& varsForRow(const Row& r) const;
@@ -226,6 +233,10 @@ namespace ui
         float m_dragGrabOffset{0.0f};
         bool m_draggingHThumb{false};
         float m_hDragGrabOffset{0.0f};
+
+        // Sort state (persists across reloads so a chosen order survives save/restore).
+        SortColumn m_sortColumn{SortColumn::Name};
+        bool       m_sortAscending{true};
 
         // Filter state
         std::wstring     m_filterText;          // lowercased, for comparison
