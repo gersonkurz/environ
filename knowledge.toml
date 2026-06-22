@@ -106,6 +106,28 @@ CUDA_HOME = "NVIDIA CUDA Toolkit home (alias for CUDA_PATH)"
 _NT_SYMBOL_PATH = "Search path for Windows debugging symbols (WinDbg, VS Debugger)"
 _NT_SOURCE_PATH = "Search path for source files during debugging"
 
+# Notes — editability/usage guidance, shown in the detail strip and when you try to edit a
+# variable environ can't change. Name lookup is case-insensitive. The variables below are
+# computed by Windows at sign-in (the "Process" group): they aren't stored in the User or
+# Machine environment keys, so environ shows them read-only and explains why here.
+[notes]
+USERPROFILE = "Set by Windows at sign-in from your profile path and rebuilt every logon, so editing it here wouldn't stick. Relocating a profile is a separate Windows operation."
+LOCALAPPDATA = "Derived from your profile at sign-in and refreshed every logon — not editable as an environment variable here."
+APPDATA = "Derived from your profile at sign-in and refreshed every logon — not editable as an environment variable here."
+HOMEDRIVE = "Computed from your account at sign-in; not editable as an environment variable here."
+HOMEPATH = "Computed from your account at sign-in; not editable as an environment variable here."
+USERNAME = "Filled in by Windows at sign-in to identify your session; read-only."
+USERDOMAIN = "Filled in by Windows at sign-in to identify your session; read-only."
+LOGONSERVER = "Set by Windows at sign-in to the domain controller that authenticated you; read-only."
+ProgramFiles = "Mirrors a Windows system setting. Changing it means relocating the Program Files folder — OS configuration, not an env-var edit."
+"ProgramFiles(x86)" = "Mirrors a Windows system setting. Changing it means relocating the Program Files folder — OS configuration, not an env-var edit."
+CommonProgramFiles = "Mirrors a Windows system setting for shared program components; read-only here."
+ProgramData = "Mirrors a Windows system folder setting; read-only here."
+SystemRoot = "Reflects where Windows is installed. Read-only — changing it would mean reinstalling or relocating Windows."
+windir = "Reflects where Windows is installed (same as SystemRoot). Read-only."
+SystemDrive = "The drive Windows is installed on. Read-only — set by the OS."
+PUBLIC = "Path to the shared public profile, set by Windows; read-only here."
+
 # Classification — extra knowledge about variables, on two independent axes. Names are
 # case-insensitive. Add your own under [classification] in
 # %LOCALAPPDATA%\environ\knowledge.toml to override these without editing this file.

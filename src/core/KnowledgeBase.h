@@ -26,6 +26,10 @@ public:
     // Case-insensitive lookup.
     std::wstring describe(std::wstring const& variable_name) const;
 
+    // Look up editability/usage guidance for a variable (the [notes] section) — e.g. why a
+    // read-only variable can't be edited here. Empty if none. Case-insensitive.
+    std::wstring note(std::wstring const& variable_name) const;
+
     // Classification override for a variable name, or None if unlisted (case-insensitive).
     ClassHint classify_override(std::wstring const& variable_name) const;
 
@@ -51,6 +55,7 @@ public:
 
 private:
     std::unordered_map<std::wstring, std::wstring> m_descriptions;
+    std::unordered_map<std::wstring, std::wstring> m_notes; // [notes]: editability guidance
     std::unordered_set<std::wstring> m_force_path;   // lowercased names
     std::unordered_set<std::wstring> m_force_scalar; // lowercased names
     std::unordered_set<std::wstring> m_folders;      // lowercased names

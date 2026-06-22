@@ -208,14 +208,25 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
             text = L"\x2192 " + detail->expandedPath;
         }
 
-        // Nothing path-specific to show -> fall back to the variable's description, if known.
-        // Colored with the accent so it reads as distinct from path/expansion details.
+        // Nothing path-specific to show -> fall back to knowledge-base guidance. Priority:
+        // a staged read-only edit attempt (warning), then a [notes] entry (editability
+        // guidance), then the plain description. Colored distinctly from path/expansion info.
         if (text.empty())
         {
-            const std::wstring desc{m_knowledge.describe(m_grid.SelectedVariableName())};
-            if (!desc.empty())
+            const std::wstring name{m_grid.SelectedVariableName()};
+            if (!m_editNote.empty() && m_editNoteVar == name)
             {
-                text = L"\x2139 " + desc; // U+2139 information source
+                text = L"\x2139 Read-only \x2014 " + m_editNote; // shown after an edit attempt
+                color = s.rowInvalid.text;
+            }
+            else if (const std::wstring note{m_knowledge.note(name)}; !note.empty())
+            {
+                text = L"\x2139 " + note; // U+2139 information source
+                color = s.accent;
+            }
+            else if (const std::wstring desc{m_knowledge.describe(name)}; !desc.empty())
+            {
+                text = L"\x2139 " + desc;
                 color = s.accent;
             }
         }
@@ -542,9 +553,21 @@ void ui::GridView::PositionEditor(const ViewContext& ctx, const Grid::EditTarget
     InvalidateRect(ctx.hwnd, nullptr, FALSE);
 }
 
+bool ui::GridView::StageReadOnlyNote(const ViewContext& ctx)
+{
+    if (m_grid.SelectionEditable() || !m_grid.HasSelection()) return false;
+    const std::wstring name{m_grid.SelectedVariableName()};
+    const std::wstring note{m_knowledge.note(name)};
+    if (note.empty()) return false;
+    m_editNote = note;
+    m_editNoteVar = name;
+    InvalidateRect(ctx.hwnd, nullptr, FALSE);
+    return true;
+}
+
 void ui::GridView::BeginEditFromGrid(const ViewContext& ctx)
 {
-    if (!m_grid.SelectionEditable()) return;
+    if (!m_grid.SelectionEditable()) { StageReadOnlyNote(ctx); return; }
     EnsureEditControl(ctx);
     if (!m_edit) return;
     if (const auto target{m_grid.BeginEdit()}) PositionEditor(ctx, *target);
@@ -552,7 +575,7 @@ void ui::GridView::BeginEditFromGrid(const ViewContext& ctx)
 
 void ui::GridView::BeginEditNameFromGrid(const ViewContext& ctx)
 {
-    if (!m_grid.SelectionEditable()) return;
+    if (!m_grid.SelectionEditable()) { StageReadOnlyNote(ctx); return; }
     EnsureEditControl(ctx);
     if (!m_edit) return;
     if (const auto target{m_grid.BeginEditName()}) PositionEditor(ctx, *target);
@@ -565,6 +588,7 @@ void ui::GridView::BeginEditAt(const ViewContext& ctx, float x, float y)
     const auto target{m_grid.BeginEditAt(x, y)};
     InvalidateRect(ctx.hwnd, nullptr, FALSE);
     if (target) PositionEditor(ctx, *target);
+    else StageReadOnlyNote(ctx); // clicked a read-only row: explain instead of doing nothing
 }
 
 void ui::GridView::RefreshEditBrush()

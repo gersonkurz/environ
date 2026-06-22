@@ -87,6 +87,11 @@ private:
     // Menu
     void ShowGridContextMenu(const ViewContext& ctx, int screenX, int screenY);
 
+    // If the selection is a read-only variable with a knowledge-base note, stage that note
+    // for prominent display in the detail strip — so an edit attempt explains itself rather
+    // than doing nothing. Returns true if a note was staged.
+    bool StageReadOnlyNote(const ViewContext& ctx);
+
     // Search
     void EnsureSearchControl(const ViewContext& ctx);
     void PositionSearchEdit(const ViewContext& ctx, const D2D1_RECT_F& bounds);
@@ -103,6 +108,11 @@ private:
     theme::ThemeSet&  m_theme;
     Environ::core::KnowledgeBase& m_knowledge; // non-const: LoadData learns into it
     std::wstring      m_userKnowledgePath;     // where learnings persist
+
+    // Read-only edit-attempt note: staged when the user tries to edit a read-only var, and
+    // shown (prominently) in the detail strip only while this variable stays selected.
+    std::wstring      m_editNote;
+    std::wstring      m_editNoteVar;
 
     // Inline editor (HWND is a child of MainWindow, managed here)
     HWND   m_edit{nullptr};

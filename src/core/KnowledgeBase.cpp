@@ -31,6 +31,16 @@ bool KnowledgeBase::load(std::string const& path) {
             spdlog::warn("Knowledge file missing [variables] section: {}", path);
         }
 
+        // [notes] — name = "editability/usage guidance". Merged like [variables].
+        if (auto notes{tbl["notes"]}; notes.is_table()) {
+            for (auto&& [key, val] : *notes.as_table()) {
+                if (val.is_string()) {
+                    m_notes[to_lower_key(key.str())] =
+                        pnq::unicode::to_utf16(std::string{*val.value<std::string>()});
+                }
+            }
+        }
+
         // [classification] — path_like = [...], scalar = [...]. An explicit kind in one
         // list removes the name from the other, so a later (user) load wins cleanly.
         if (auto classification{tbl["classification"]}; classification.is_table()) {
@@ -175,6 +185,16 @@ std::wstring KnowledgeBase::describe(std::wstring const& variable_name) const {
     std::ranges::transform(lower, lower.begin(), ::towlower);
     auto it{m_descriptions.find(lower)};
     if (it != m_descriptions.end()) {
+        return it->second;
+    }
+    return {};
+}
+
+std::wstring KnowledgeBase::note(std::wstring const& variable_name) const {
+    std::wstring lower{variable_name};
+    std::ranges::transform(lower, lower.begin(), ::towlower);
+    auto it{m_notes.find(lower)};
+    if (it != m_notes.end()) {
         return it->second;
     }
     return {};
