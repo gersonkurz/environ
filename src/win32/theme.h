@@ -8,6 +8,12 @@
 #include <string>
 #include <vector>
 
+// Point-in-rect hit test, shared by every painter (right-open/bottom-open).
+inline bool Contains(const D2D1_RECT_F& r, float x, float y)
+{
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+}
+
 namespace theme
 {
     constexpr D2D1_COLOR_F Rgb(unsigned int c, float a = 1.0f)

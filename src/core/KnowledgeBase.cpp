@@ -1,5 +1,6 @@
 #include "precomp.h"
 #include "KnowledgeBase.h"
+#include "EnvStore.h"   // to_wlower
 
 #include <fstream>
 
@@ -8,9 +9,7 @@ namespace Environ::core {
 namespace {
 
 std::wstring to_lower_key(std::string_view utf8_name) {
-    std::wstring name{pnq::unicode::to_utf16(std::string{utf8_name})};
-    std::ranges::transform(name, name.begin(), ::towlower);
-    return name;
+    return to_wlower(pnq::unicode::to_utf16(std::string{utf8_name}));
 }
 
 } // namespace
@@ -74,46 +73,35 @@ bool KnowledgeBase::load(std::string const& path) {
 }
 
 KnowledgeBase::ClassHint KnowledgeBase::classify_override(std::wstring const& variable_name) const {
-    std::wstring lower{variable_name};
-    std::ranges::transform(lower, lower.begin(), ::towlower);
+    const std::wstring lower{to_wlower(variable_name)};
     if (m_force_path.contains(lower)) return ClassHint::ForcePath;
     if (m_force_scalar.contains(lower)) return ClassHint::ForceScalar;
     return ClassHint::None;
 }
 
 KnowledgeBase::PathRole KnowledgeBase::path_role(std::wstring const& variable_name) const {
-    std::wstring lower{variable_name};
-    std::ranges::transform(lower, lower.begin(), ::towlower);
+    const std::wstring lower{to_wlower(variable_name)};
     if (m_folders.contains(lower)) return PathRole::Folder;
     if (m_files.contains(lower)) return PathRole::File;
     return PathRole::None;
 }
 
-namespace {
-
-std::wstring lower(std::wstring s) {
-    std::ranges::transform(s, s.begin(), ::towlower);
-    return s;
-}
-
-} // namespace
-
 void KnowledgeBase::learn_folder(std::wstring const& variable_name) {
-    const std::wstring key{lower(variable_name)};
+    const std::wstring key{to_wlower(variable_name)};
     if (m_folders.contains(key) || m_files.contains(key)) return; // role already known
     m_folders.insert(key);
     m_learned_folders.push_back(variable_name);
 }
 
 void KnowledgeBase::learn_file(std::wstring const& variable_name) {
-    const std::wstring key{lower(variable_name)};
+    const std::wstring key{to_wlower(variable_name)};
     if (m_folders.contains(key) || m_files.contains(key)) return; // role already known
     m_files.insert(key);
     m_learned_files.push_back(variable_name);
 }
 
 void KnowledgeBase::learn_path_like(std::wstring const& variable_name) {
-    const std::wstring key{lower(variable_name)};
+    const std::wstring key{to_wlower(variable_name)};
     if (m_force_path.contains(key) || m_force_scalar.contains(key)) return; // kind already known
     m_force_path.insert(key);
     m_learned_path.push_back(variable_name);
@@ -156,7 +144,7 @@ bool KnowledgeBase::save_learned(std::string const& path) {
             if (auto s{el.value<std::string>()})
                 have.insert(to_lower_key(*s));
         for (auto const& name : names) {
-            const std::wstring lk{lower(name)};
+            const std::wstring lk{to_wlower(name)};
             if (have.contains(lk)) continue;
             have.insert(lk);
             arr.push_back(pnq::unicode::to_utf8(name));
@@ -189,9 +177,7 @@ bool KnowledgeBase::save_learned(std::string const& path) {
 }
 
 std::wstring KnowledgeBase::describe(std::wstring const& variable_name) const {
-    std::wstring lower{variable_name};
-    std::ranges::transform(lower, lower.begin(), ::towlower);
-    auto it{m_descriptions.find(lower)};
+    auto it{m_descriptions.find(to_wlower(variable_name))};
     if (it != m_descriptions.end()) {
         return it->second;
     }
@@ -199,9 +185,7 @@ std::wstring KnowledgeBase::describe(std::wstring const& variable_name) const {
 }
 
 std::wstring KnowledgeBase::note(std::wstring const& variable_name) const {
-    std::wstring lower{variable_name};
-    std::ranges::transform(lower, lower.begin(), ::towlower);
-    auto it{m_notes.find(lower)};
+    auto it{m_notes.find(to_wlower(variable_name))};
     if (it != m_notes.end()) {
         return it->second;
     }
@@ -209,9 +193,7 @@ std::wstring KnowledgeBase::note(std::wstring const& variable_name) const {
 }
 
 bool KnowledgeBase::is_volatile(std::wstring const& variable_name) const {
-    std::wstring lower{variable_name};
-    std::ranges::transform(lower, lower.begin(), ::towlower);
-    return m_volatile.contains(lower);
+    return m_volatile.contains(to_wlower(variable_name));
 }
 
 } // namespace Environ::core

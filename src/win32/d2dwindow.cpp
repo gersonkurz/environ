@@ -21,11 +21,6 @@ namespace
     constexpr wchar_t kGlyphRestore{0xE923};
     constexpr wchar_t kGlyphClose{0xE8BB};
 
-    bool Contains(const D2D1_RECT_F& r, float x, float y)
-    {
-        return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
-    }
-
     struct CaptionButtons
     {
         D2D1_RECT_F min, max, close;

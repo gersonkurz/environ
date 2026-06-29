@@ -7,11 +7,6 @@
 
 namespace
 {
-    bool Contains(const D2D1_RECT_F& r, float x, float y)
-    {
-        return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
-    }
-
     // Format "2026-06-18T14:22:05Z" as "2026-06-18  14:22:05"
     std::wstring FormatTimestamp(const std::string& ts)
     {

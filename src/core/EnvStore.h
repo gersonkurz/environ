@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cwctype>
 #include <optional>
 #include <string>
 #include <vector>
@@ -7,6 +9,12 @@
 namespace Environ::core {
 
 class KnowledgeBase; // classification overrides; see read_variables
+
+// Lowercase a wide string in place and return it (case-insensitive name keys).
+inline std::wstring to_wlower(std::wstring s) {
+    std::ranges::transform(s, s.begin(), ::towlower);
+    return s;
+}
 
 enum class Scope { User, Machine };
 enum class EnvVariableKind { Scalar, PathList };

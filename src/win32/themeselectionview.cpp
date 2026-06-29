@@ -4,14 +4,6 @@
 
 #include "themeselectionview.h"
 
-namespace
-{
-    bool Contains(const D2D1_RECT_F& r, float x, float y)
-    {
-        return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------

@@ -12,11 +12,6 @@ namespace ui
         constexpr wchar_t kGlyphMachine{0xEC76}; // Devices (this PC)
         constexpr wchar_t kGlyphProcess{0xE72E}; // Lock (read-only / set by Windows)
 
-        bool Contains(const D2D1_RECT_F& r, float x, float y)
-        {
-            return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
-        }
-
         void DrawString(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
                       const std::wstring& s, IDWriteTextFormat* fmt,
                       const D2D1_RECT_F& box, const D2D1_COLOR_F& color)

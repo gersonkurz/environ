@@ -28,11 +28,6 @@ namespace
     constexpr UINT WM_APP_SEARCH_CLOSE{WM_APP + 2};
     constexpr UINT WM_APP_SEARCH_GRID{WM_APP + 3};
 
-    bool Contains(const D2D1_RECT_F& r, float x, float y)
-    {
-        return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
-    }
-
     COLORREF ToColorRef(const D2D1_COLOR_F& c)
     {
         return RGB(static_cast<BYTE>(c.r * 255.0f), static_cast<BYTE>(c.g * 255.0f), static_cast<BYTE>(c.b * 255.0f));

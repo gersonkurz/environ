@@ -128,9 +128,7 @@ std::vector<EnvChange> compute_diff(
     // Build a lookup from original names (case-insensitive) to their entries
     std::unordered_map<std::wstring, std::size_t> original_by_name;
     for (std::size_t i{0}; i < original.size(); ++i) {
-        std::wstring lower{original[i].name};
-        for (auto& ch : lower) ch = towlower(ch);
-        original_by_name[lower] = i;
+        original_by_name[to_wlower(original[i].name)] = i;
     }
 
     // Track which originals are accounted for
@@ -139,10 +137,7 @@ std::vector<EnvChange> compute_diff(
     for (const auto& var : current) {
         // Check if this is a rename
         if (var.original_name.has_value()) {
-            std::wstring lower_old{*var.original_name};
-            for (auto& ch : lower_old) ch = towlower(ch);
-
-            auto it{original_by_name.find(lower_old)};
+            auto it{original_by_name.find(to_wlower(*var.original_name))};
             if (it != original_by_name.end()) {
                 original_seen[it->second] = true;
                 changes.push_back(EnvChange{
@@ -157,10 +152,7 @@ std::vector<EnvChange> compute_diff(
         }
 
         // Look up by current name
-        std::wstring lower{var.name};
-        for (auto& ch : lower) ch = towlower(ch);
-
-        auto it{original_by_name.find(lower)};
+        auto it{original_by_name.find(to_wlower(var.name))};
         if (it == original_by_name.end()) {
             // New variable
             changes.push_back(EnvChange{
@@ -206,11 +198,7 @@ std::wstring validate_variables(std::vector<EnvVariable> const& vars) {
         if (v.name.find(L'=') != std::wstring::npos) {
             return std::format(L"Variable name '{}' contains '=', which is not allowed.", v.name);
         }
-        std::wstring key{v.name};
-        for (auto& ch : key) {
-            ch = static_cast<wchar_t>(std::towlower(ch));
-        }
-        if (!seen.insert(key).second) {
+        if (!seen.insert(to_wlower(v.name)).second) {
             return std::format(L"Two variables are named '{}' in the same scope.", v.name);
         }
     }
@@ -318,18 +306,13 @@ std::vector<std::wstring> build_diff_table(
     struct TableRow { std::wstring name, left, right; };
     std::vector<TableRow> rows;
 
-    const auto toLower = [](std::wstring s) {
-        std::ranges::transform(s, s.begin(), ::towlower);
-        return s;
-    };
-
     const auto addScope = [&](const wchar_t* scope,
                                const std::vector<EnvVariable>& lv,
                                const std::vector<EnvVariable>& rv) {
         // Build name->variable maps.
         std::map<std::wstring, const EnvVariable*> leftMap, rightMap;
-        for (const auto& v : lv) leftMap[toLower(v.name)] = &v;
-        for (const auto& v : rv) rightMap[toLower(v.name)] = &v;
+        for (const auto& v : lv) leftMap[to_wlower(v.name)] = &v;
+        for (const auto& v : rv) rightMap[to_wlower(v.name)] = &v;
 
         // Collect all names, sorted case-insensitively.
         std::set<std::wstring> keys;

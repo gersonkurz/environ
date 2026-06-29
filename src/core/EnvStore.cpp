@@ -215,9 +215,7 @@ std::vector<EnvVariable> read_process_extras(
     std::unordered_set<std::wstring> persistent;
     const auto add_names = [&](std::vector<EnvVariable> const& vars) {
         for (auto const& v : vars) {
-            std::wstring key{v.name};
-            std::ranges::transform(key, key.begin(), ::towlower);
-            persistent.insert(std::move(key));
+            persistent.insert(to_wlower(v.name));
         }
     };
     add_names(userVars);
@@ -235,9 +233,7 @@ std::vector<EnvVariable> read_process_extras(
 
         std::wstring name{entry.substr(0, eq)};
         std::wstring value{entry.substr(eq + 1)};
-        std::wstring key{name};
-        std::ranges::transform(key, key.begin(), ::towlower);
-        if (persistent.contains(key)) continue; // effective User/Machine row already (shadowing TBD)
+        if (persistent.contains(to_wlower(name))) continue; // effective User/Machine row already (shadowing TBD)
 
         std::vector<std::wstring> segments;
         const EnvVariableKind kind{classify_variable(value, segments)};
@@ -328,8 +324,7 @@ void detect_duplicates(std::vector<EnvVariable>& user_vars,
 
             for (std::size_t i{0}; i < var.expanded_segments.size(); ++i) {
                 // Normalize: lowercase, remove trailing backslash
-                auto key{var.expanded_segments[i]};
-                std::ranges::transform(key, key.begin(), ::towlower);
+                auto key{to_wlower(var.expanded_segments[i])};
                 while (key.size() > 3 && (key.back() == L'\\' || key.back() == L'/')) {
                     key.pop_back();
                 }
@@ -376,9 +371,7 @@ void detect_shadowed(std::vector<EnvVariable>& user_vars,
             if (entry.front() == L'=') continue; // "=C:=..." per-drive working-dir entries
             const auto eq{entry.find(L'=')};
             if (eq == std::wstring::npos || eq == 0) continue;
-            std::wstring key{entry.substr(0, eq)};
-            std::ranges::transform(key, key.begin(), ::towlower);
-            effective.emplace(std::move(key), entry.substr(eq + 1));
+            effective.emplace(to_wlower(entry.substr(0, eq)), entry.substr(eq + 1));
         }
         FreeEnvironmentStringsW(block);
     }
@@ -393,9 +386,7 @@ void detect_shadowed(std::vector<EnvVariable>& user_vars,
             if (v.kind != EnvVariableKind::Scalar) continue;
             if (!kb.is_volatile(v.name)) continue;
 
-            std::wstring key{v.name};
-            std::ranges::transform(key, key.begin(), ::towlower);
-            const auto it{effective.find(key)};
+            const auto it{effective.find(to_wlower(v.name))};
             if (it == effective.end()) continue;
 
             // Compare the EXPANDED persistent value, so a REG_EXPAND_SZ that expands to the
