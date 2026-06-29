@@ -5,6 +5,7 @@
 #pragma once
 
 #include <d2d1.h>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,7 @@ namespace theme
     struct ColorScheme
     {
         std::string name;
+        std::array<D2D1_COLOR_F, 16> base16{}; // raw base00..base0F, for the theme-picker swatch
         D2D1_COLOR_F windowBg;
         D2D1_COLOR_F accent;
         D2D1_COLOR_F accentText; // text drawn on an accent fill (e.g. primary button)
@@ -59,11 +61,13 @@ namespace theme
         Style edit;              // inline cell editor: fill + focus border + text
     };
 
-    // A theme's name plus whether it is a dark scheme — for grouped listings.
+    // A theme's name, dark/light flag, and raw palette — for the grouped picker
+    // listing and its 16-color swatch.
     struct ThemeInfo
     {
         std::string name;
         bool dark;
+        std::array<D2D1_COLOR_F, 16> base16;
     };
 
     // Owns the available schemes loaded from Base16 YAML files in a themes/ directory.

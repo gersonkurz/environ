@@ -346,6 +346,8 @@ void ui::MainWindow::ApplyHistoryRestore()
 
 void ui::MainWindow::CheckThemeAction()
 {
+    // A selection (or a Cancel restore) repaints the whole window in the new
+    // theme, but does NOT persist — that waits for Apply.
     if (m_themeView.ThemeChanged())
     {
         m_themeView.ClearThemeChanged();
@@ -354,6 +356,15 @@ void ui::MainWindow::CheckThemeAction()
     const auto action{m_themeView.PendingAction()};
     if (action == ThemeSelectionView::Action::None) return;
     m_themeView.ClearPendingAction();
+
+    if (action == ThemeSelectionView::Action::Apply)
+    {
+        m_settings.appearance.theme.set(m_theme.Current().name);
+        m_settings.save();
+    }
+    // Cancel: the view already restored the opening theme via the ThemeChanged
+    // path above; settings still hold it, so there is nothing to persist.
+
     m_eatNextDblClk = true;
     SwitchToView(&m_gridView);
 }
@@ -362,8 +373,6 @@ void ui::MainWindow::ApplyThemeChange()
 {
     ApplyTitleBar();
     m_gridView.RefreshEditBrush();
-    m_settings.appearance.theme.set(m_theme.Current().name);
-    m_settings.save();
 }
 
 // --- Data / save ---
@@ -800,7 +809,13 @@ void ui::MainWindow::HandleNavClick(int item)
     {
     case NavAction::Themes:
         if (m_activeView == &m_themeView)
+        {
+            // Toggling the picker closed via the nav keeps the live selection
+            // (there's no Apply/Cancel here), so persist it.
+            m_settings.appearance.theme.set(m_theme.Current().name);
+            m_settings.save();
             SwitchToView(&m_gridView);
+        }
         else
         {
             if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);

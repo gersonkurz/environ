@@ -1,16 +1,20 @@
-// ThemeSelectionView — lists all loaded Base16 themes and lets the user
-// pick one.  Selection is immediate (colours change on click / arrow key).
-// Close returns to GridView; the chosen theme is persisted by MainWindow.
+// ThemeSelectionView — lists all loaded Base16 themes in two columns (Dark |
+// Light), each row showing the theme name and a 16-color swatch.  Selecting a
+// theme live-previews it (colours change immediately, not persisted); Apply
+// commits the choice, Cancel/Esc restores the theme that was active on open.
 #pragma once
 
 #include "view.h"
+
+#include <array>
 
 namespace ui {
 
 class ThemeSelectionView final : public View
 {
 public:
-    enum class Action { None, Close };
+    // Apply commits + closes; Cancel restores the opening theme + closes.
+    enum class Action { None, Apply, Cancel };
 
     explicit ThemeSelectionView(theme::ThemeSet& themes);
 
@@ -37,36 +41,40 @@ public:
 
 private:
     struct Geom {
-        D2D1_RECT_F card{}, list{}, closeBtn{};
-        float rowH{32.0f};
+        D2D1_RECT_F card{}, col[2]{}, okBtn{}, cancelBtn{};
+        float rowH{46.0f};
     };
 
-    // One row in the list: either a group header ("Dark"/"Light") or a theme.
+    // One row in a column: a group header ("Dark"/"Light") or a theme.
     struct Entry
     {
         bool header{false};
-        std::wstring label;    // display text (header title or theme name)
-        std::string themeName; // scheme name to select (theme rows only)
+        std::wstring label;                  // display text (header title or theme name)
+        std::string themeName;               // scheme name to select (theme rows only)
+        std::array<D2D1_COLOR_F, 16> base16; // palette for the swatch (theme rows only)
     };
 
-    void  BuildEntries();
-    int   NextThemeRow(int from, int dir) const; // skips headers; -1 if none
+    void  BuildColumns();
+    void  Preview(const std::string& name); // visual-only theme switch + repaint flag
+    int   NextThemeRow(int col, int from, int dir) const; // skips headers; -1 if none
 
     Geom  ComputeLayout(const D2D1_RECT_F& bounds) const;
-    int   RowAtPoint(const Geom& g, float x, float y) const; // theme rows only, else -1
-    void  EnsureVisible(const Geom& g, int idx);
+    bool  RowAtPoint(const Geom& g, float x, float y, int& col, int& row) const;
+    void  EnsureVisible(const Geom& g, int row);
     void  ClampScroll(const Geom& g);
-    void  DrawButton(const ViewContext& ctx, const D2D1_RECT_F& r,
-                     const wchar_t* label, bool primary, bool hover) const;
+    int   MaxRows() const; // tallest column, for scroll bounds
+    void  DrawRow(const ViewContext& ctx, const Entry& e, const D2D1_RECT_F& r,
+                  bool selected, bool hovered) const;
 
-    theme::ThemeSet&     m_themes;
-    std::vector<Entry>   m_entries;
-    int   m_selected{-1};   // index into m_entries (a theme row), or -1
-    int   m_rowHover{-1};   // index into m_entries (a theme row), or -1
-    int   m_btnHover{-1};
+    theme::ThemeSet&   m_themes;
+    std::vector<Entry> m_col[2]; // 0 = Dark, 1 = Light (each: header + theme rows)
+    int   m_selCol{-1}, m_selRow{-1}; // selected theme (column + row), or -1
+    int   m_hovCol{-1}, m_hovRow{-1}; // hovered theme row, or -1
+    int   m_btnHover{-1};             // 0 = Apply, 1 = Cancel, else -1
     float m_scroll{0.0f};
-    bool  m_needScrollToSelected{false}; // honor on next paint (real bounds known)
+    bool  m_needScrollToSelected{false};
     D2D1_RECT_F m_lastBounds{};
+    std::string m_openingTheme;       // theme active when the view opened (for Cancel)
     Action m_pendingAction{Action::None};
     bool   m_themeChanged{false};
 };

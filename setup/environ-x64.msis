@@ -2,12 +2,11 @@
 <setup>
     <!-- Setup script uses MSIS - see https://github.com/gersonkurz/msis -->
     <set name="PRODUCT_NAME" value="environ x64"/>
-    <set name="PRODUCT_VERSION" value="1.1.0"/>
+    <set name="PRODUCT_VERSION" value="1.2.0"/>
     <set name="LANGUAGE" value="en-us"/>
     <set name="PLATFORM" value="x64"/>
     <set name="REPAIR_ENABLED" value="True"/>
     <set name="REMOVE_ENABLED" value="True"/>
-    <set name="REMOVE_FOLDERS_ON_UNINSTALL" value="True"/>
     <set name="BUILD_TARGET" value="environ {{PRODUCT_VERSION}} x64.msi"/>
     <set name="UPGRADE_CODE" value="87173CE7-CEC5-4304-9237-FC17E5FCF77C"/>
     <set name="MANUFACTURER" value="https://github.com/gersonkurz/environ"/>

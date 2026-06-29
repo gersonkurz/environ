@@ -104,6 +104,8 @@ namespace theme
 
             return ColorScheme{
                 .name{name},
+                .base16{p.base00, p.base01, p.base02, p.base03, p.base04, p.base05, p.base06, p.base07,
+                        p.base08, p.base09, p.base0A, p.base0B, p.base0C, p.base0D, p.base0E, p.base0F},
                 .windowBg{p.base00},
                 .accent{p.base0D},
                 .accentText{accentText},
@@ -253,7 +255,7 @@ namespace theme
         std::vector<ThemeInfo> infos;
         infos.reserve(m_schemes.size());
         for (const auto& s : m_schemes)
-            infos.push_back(ThemeInfo{s.name, s.isDark});
+            infos.push_back(ThemeInfo{s.name, s.isDark, s.base16});
         return infos;
     }
 }
