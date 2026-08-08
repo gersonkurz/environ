@@ -141,6 +141,8 @@ namespace
     constexpr UINT kMenuRemove{1003};
     constexpr UINT kMenuBrowse{1004};
     constexpr UINT kMenuReveal{1005};
+    constexpr UINT kMenuNewUser{1006};
+    constexpr UINT kMenuNewMachine{1007};
 
     // Owner-drawn menu item data -- stored in MENUITEMINFO::dwItemData.
     struct MenuItemData
@@ -1460,16 +1462,17 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             case kMenuReveal:
                 m_gridView.RevealSelected(ctx);
                 return 0;
-            case kMenuInsert:
-                if (m_grid.SelectedIsPathEntry())
-                {
-                    if (m_grid.AddEntry()) { InvalidateRect(m_hwnd, nullptr, FALSE); m_gridView.BeginEditFromGrid(ctx); }
-                }
-                else
-                {
-                    if (m_grid.AddVariable()) { InvalidateRect(m_hwnd, nullptr, FALSE); m_gridView.BeginEditNameFromGrid(ctx); }
-                }
+            case kMenuInsert: // only offered on path entries
+                if (m_grid.AddEntry()) { InvalidateRect(m_hwnd, nullptr, FALSE); m_gridView.BeginEditFromGrid(ctx); }
                 return 0;
+            case kMenuNewUser:
+            case kMenuNewMachine:
+            {
+                const auto scope{LOWORD(wp) == kMenuNewUser ? Environ::core::Scope::User
+                                                            : Environ::core::Scope::Machine};
+                if (m_grid.AddVariable(scope)) { InvalidateRect(m_hwnd, nullptr, FALSE); m_gridView.BeginEditNameFromGrid(ctx); }
+                return 0;
+            }
             case kMenuRemove:
                 if (m_grid.SelectedIsPathEntry())
                     Repaint(m_grid.RemoveEntry());

@@ -963,13 +963,18 @@ namespace ui
         return true;
     }
 
-    bool Grid::AddVariable()
+    Environ::core::Scope Grid::NewVariableScope() const
     {
-        // Determine scope: use the selected row's scope if available and editable,
-        // otherwise default to User (always editable).
-        Environ::core::Scope scope{Environ::core::Scope::User};
+        // Inherit the selected row's scope when that row is editable, otherwise User
+        // (always editable). Process rows are read-only, so they fall through to User.
         if (HasSelection() && !m_rows[static_cast<size_t>(m_selected)].readOnly)
-            scope = m_rows[static_cast<size_t>(m_selected)].scope;
+            return m_rows[static_cast<size_t>(m_selected)].scope;
+        return Environ::core::Scope::User;
+    }
+
+    bool Grid::AddVariable(std::optional<Environ::core::Scope> requested)
+    {
+        const Environ::core::Scope scope{requested.value_or(NewVariableScope())};
 
         // Find insertion point. If we have an editable selection, insert right after the
         // selected variable's unit; otherwise append after the last row of the target group.

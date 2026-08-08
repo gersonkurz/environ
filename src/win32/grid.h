@@ -76,7 +76,10 @@ namespace ui
 
         // Variable-level structural editing: create a new blank variable or delete
         // the selected variable entirely (all its rows). Returns true if changed.
-        bool AddVariable();
+        // AddVariable without a scope infers one (see NewVariableScope) — that's the
+        // Ins key. Pass a scope to create deliberately in User or Machine.
+        Environ::core::Scope NewVariableScope() const;
+        bool AddVariable(std::optional<Environ::core::Scope> scope = std::nullopt);
         bool RemoveVariable();
 
         // Detail strip: info about the currently selected row for display below the grid.

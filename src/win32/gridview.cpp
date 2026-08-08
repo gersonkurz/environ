@@ -19,6 +19,8 @@ namespace
     constexpr UINT kMenuRemove{1003};
     constexpr UINT kMenuBrowse{1004};
     constexpr UINT kMenuReveal{1005};
+    constexpr UINT kMenuNewUser{1006};
+    constexpr UINT kMenuNewMachine{1007};
 
     // Segoe Fluent Icons glyphs for the in-cell action button.
     constexpr wchar_t kGlyphFolder{0xE8B7}; // "Folder" (browse-to-change a folder)
@@ -706,8 +708,13 @@ void ui::GridView::ShowGridContextMenu(const ViewContext& ctx, int screenX, int 
 
     const int selCount{m_grid.SelectionCount()};
     MenuItemData dataCopy{selCount > 1 ? std::format(L"Copy {} rows", selCount) : std::wstring{L"Copy"}, L"Ctrl+C"};
-    MenuItemData dataInsert{isPath ? L"Insert entry" : L"New variable", L"Ins"};
+    MenuItemData dataInsert{L"Insert entry", L"Ins"};
     MenuItemData dataRemove{isPath ? L"Remove entry" : L"Delete variable", L"Del"};
+    // Ins infers a scope from the selection; label whichever item it would create.
+    const bool insMakesUser{m_grid.NewVariableScope() == Environ::core::Scope::User};
+    MenuItemData dataNewUser{L"New user variable", insMakesUser ? L"Ins" : L""};
+    MenuItemData dataNewMachine{L"New machine variable",
+                                m_elevated ? (insMakesUser ? L"" : L"Ins") : L"needs admin"};
     MenuItemData dataBrowse{role == Environ::core::KnowledgeBase::PathRole::File
                                 ? L"Browse for file\x2026" : L"Browse for folder\x2026", L""};
     MenuItemData dataReveal{revealRole == Environ::core::KnowledgeBase::PathRole::File
@@ -729,7 +736,15 @@ void ui::GridView::ShowGridContextMenu(const ViewContext& ctx, int screenX, int 
         addItem(kMenuBrowse, &dataBrowse, true);
     if (revealRole != Environ::core::KnowledgeBase::PathRole::None)
         addItem(kMenuReveal, &dataReveal, true);
-    addItem(kMenuInsert, &dataInsert, editable);
+    if (isPath)
+    {
+        addItem(kMenuInsert, &dataInsert, editable);
+    }
+    else
+    {
+        addItem(kMenuNewUser, &dataNewUser, true);
+        addItem(kMenuNewMachine, &dataNewMachine, m_elevated);
+    }
     addItem(kMenuRemove, &dataRemove, editable);
 
     const theme::ColorScheme& s{*ctx.scheme};
