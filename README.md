@@ -23,9 +23,11 @@ belongs on the operating system it runs on.
 ## Features
 
 - **One grid, every variable.** Your variables (per-user), the machine's, **and** the ones
-  Windows computes at sign-in (`USERPROFILE`, `LOCALAPPDATA`, `ProgramFiles`, …) — all in one
-  editable, Excel-style grid. A per-row icon shows each one's origin at a glance: 👤 user,
-  🖥 machine, 🔒 read-only (set by Windows). Edit names and values in place.
+  that exist only in the running process — all in one editable, Excel-style grid. A per-row
+  icon shows each one's origin at a glance: 👤 user, 🖥 machine, 🔒 session, ▶ inherited
+  (the last two are read-only, in their own colors). Edit names and values in place.
+  New variables are created deliberately: right-click gives you **New user variable** and
+  **New machine variable** separately, the latter greyed out until you're running as admin.
 - **Sort it your way.** Click the **Name** or **Value** header to sort the whole list
   alphabetically (click again to reverse) — scopes merge into one A–Z list, the icons keep
   them straight.
@@ -64,6 +66,24 @@ the Tomorrow family (including the gloriously blue *Tomorrow Night Blue*) and fr
 grouped by light and dark, switched live. Fancy something else? Drop any Base16 `.yaml`
 into the `themes` folder and it shows up. Fonts, zoom (`Ctrl`+mouse-wheel), and horizontal
 scrolling for the truly cursed `PATH` are all adjustable.
+
+## Session vs. inherited variables
+
+Not everything in your environment lives in the registry. Environ shows those extras too,
+read-only, and splits them into two kinds because they behave differently:
+
+- 🔒 **session** — Windows built these at sign-in: `USERPROFILE`, `LOCALAPPDATA`, `USERNAME`,
+  `ProgramFiles`. Every process on your machine sees them. They're read-only here because
+  changing them isn't an environment-variable edit — it's relocating a system folder.
+- ▶ **inherited** — the process that *launched* environ set these. A `POSH_*` from your
+  prompt theme, `VisualStudioVersion` from a developer command prompt, `VIRTUAL_ENV` from an
+  activated venv, `WT_SESSION` from Windows Terminal. They exist in that process tree only.
+
+This is why **inherited variables disappear when you click "Run as Administrator"**. Elevation
+doesn't fork environ; it asks Windows to start a *new* process, whose parent is a system
+service rather than your shell. That process genuinely has no `POSH_CURSOR_LINE`. Environ
+shows you what's actually there rather than replaying a stale snapshot at you — the empty
+space is the honest answer.
 
 ## Machine variables & "Run as Administrator"
 

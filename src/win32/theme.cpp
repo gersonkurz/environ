@@ -112,12 +112,23 @@ namespace theme
                 .scrim{WithAlpha(p.base00, 0.5f)},
                 .headerText{p.base05},
                 .headerSubtext{p.base04},
+                // Chroma marks what you can act on: editable rows carry the hue (see .row.text),
+                // and both read-only categories stay on the achromatic ramp. base03 is the
+                // Base16 "comments / invisibles" slot; inherited sits a step toward base05, so
+                // the two greys separate without either taking on a color.
+                // ponytail: worst-case separation is 12/255 luminance (both Solarizeds, whose
+                // base03..base05 span is only 39). The per-row glyph carries it there.
                 .readonlyText{p.base03},
+                .inheritedText{Lerp(p.base03, p.base05, 0.30f)},
                 .darkTitleBar{Luminance(p.base00) < 0.5f},
                 .isDark{Luminance(p.base00) < 0.5f},
                 .card{.fill{p.base01}, .border{p.base02}, .text{p.base05}, .borderWidth{1.0f}},
                 .header{.fill{p.base01}, .border{p.base02}, .text{p.base04}, .borderWidth{0.0f}},
-                .row{.fill{p.base01}, .border{p.base01}, .text{p.base05}, .borderWidth{0.0f}},
+                // Editable rows are the app's actionable surface, so they get the interactive hue
+                // (base0D, the Base16 "functions / headings" slot — also .accent). Read-only rows
+                // override this with readonlyText/inheritedText, which makes "can I edit this?"
+                // a chromatic question rather than a brightness one.
+                .row{.fill{p.base01}, .border{p.base01}, .text{p.base0D}, .borderWidth{0.0f}},
                 .rowHover{.fill{Lerp(p.base01, p.base02, 0.4f)}, .border{Lerp(p.base01, p.base02, 0.4f)}, .text{p.base05}, .borderWidth{0.0f}},
                 .rowSelected{.fill{p.base02}, .border{p.base02}, .text{p.base07}, .borderWidth{0.0f}},
                 .rowDirty{.fill{p.base01}, .border{p.base01}, .text{p.base0A}, .borderWidth{0.0f}},

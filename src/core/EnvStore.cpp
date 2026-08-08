@@ -209,7 +209,8 @@ std::vector<EnvVariable> read_variables(Scope scope, const KnowledgeBase* kb) {
 
 std::vector<EnvVariable> read_process_extras(
     std::vector<EnvVariable> const& userVars,
-    std::vector<EnvVariable> const& machineVars) {
+    std::vector<EnvVariable> const& machineVars,
+    const KnowledgeBase* kb) {
 
     // Names already shown as User/Machine (case-insensitive); excluded here.
     std::unordered_set<std::wstring> persistent;
@@ -237,12 +238,15 @@ std::vector<EnvVariable> read_process_extras(
 
         std::vector<std::wstring> segments;
         const EnvVariableKind kind{classify_variable(value, segments)};
+        // Not recomputed by Windows at sign-in => it came from whatever launched us.
+        const bool inherited{kb && !kb->is_volatile(name)};
         result.push_back(EnvVariable{
             .name{std::move(name)},
             .value{std::move(value)},
             .segments{std::move(segments)},
             .kind{kind},
             .is_expandable{false}, // process values are already expanded
+            .inherited{inherited},
         });
     }
     FreeEnvironmentStringsW(block);

@@ -46,7 +46,8 @@ namespace theme
         D2D1_COLOR_F scrim;      // translucent backdrop behind a modal
         D2D1_COLOR_F headerText;
         D2D1_COLOR_F headerSubtext;
-        D2D1_COLOR_F readonlyText; // machine vars when unelevated
+        D2D1_COLOR_F readonlyText;  // machine vars when unelevated, and session (Windows-set) vars
+        D2D1_COLOR_F inheritedText; // process-env vars inherited from the launching process
         bool darkTitleBar;
         bool isDark; // dark vs light scheme (from background luminance); used for grouping
         Style card;

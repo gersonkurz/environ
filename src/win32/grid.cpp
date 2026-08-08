@@ -10,7 +10,8 @@ namespace ui
         // Per-row scope icons (Segoe Fluent Icons). Invariant to sort/filter order.
         constexpr wchar_t kGlyphUser{0xE77B};    // Contact (person)
         constexpr wchar_t kGlyphMachine{0xEC76}; // Devices (this PC)
-        constexpr wchar_t kGlyphProcess{0xE72E}; // Lock (read-only / set by Windows)
+        constexpr wchar_t kGlyphProcess{0xE72E};   // Lock (read-only / set by Windows at sign-in)
+        constexpr wchar_t kGlyphInherited{0xE756}; // CommandPrompt (came from the launching process)
 
         void DrawString(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
                       const std::wstring& s, IDWriteTextFormat* fmt,
@@ -54,9 +55,12 @@ namespace ui
             {
                 const EnvVariable& v{vars[static_cast<size_t>(vi)]};
                 const int unit{m_nextUnit++};
+                // Process extras split per-variable; every other group is uniform.
+                const RowGroup g{(group == RowGroup::Process && v.inherited) ? RowGroup::Inherited
+                                                                            : group};
                 Row var{};
                 var.kind = Row::Kind::Variable;
-                var.group = group;
+                var.group = g;
                 var.col1 = v.name;
                 var.col1Original = v.name;
                 var.depth = 0;
@@ -78,7 +82,7 @@ namespace ui
                     {
                         Row seg{};
                         seg.kind = Row::Kind::Segment;
-                        seg.group = group;
+                        seg.group = g;
                         seg.col2 = v.segments[i];
                         seg.original = seg.col2;
                         seg.depth = 1;
@@ -107,7 +111,7 @@ namespace ui
         // Process extras are always read-only and never written; the dummy Scope is never used
         // (Process rows are excluded from CurrentVars/diff and the struct-dirty paint guard).
         addGroup(processVars, RowGroup::Process, Scope::User, true);
-        ApplySort(); // merge the three groups into one globally-sorted list
+        ApplySort(); // merge every group into one globally-sorted list
     }
 
     void Grid::SetDataForRestore(
@@ -343,6 +347,11 @@ namespace ui
             && orig[static_cast<size_t>(r.varIndex)].shadowed;
     }
 
+    bool Grid::SelectionInherited() const
+    {
+        return HasSelection() && m_rows[static_cast<size_t>(m_selected)].group == RowGroup::Inherited;
+    }
+
     std::wstring Grid::SelectionEffectiveValue() const
     {
         if (m_selected < 0 || m_selected >= static_cast<int>(m_rows.size())) return {};
@@ -357,7 +366,8 @@ namespace ui
         switch (r.group)
         {
         case RowGroup::Machine: return m_machineOrig;
-        case RowGroup::Process: return m_processVars;
+        case RowGroup::Process:
+        case RowGroup::Inherited: return m_processVars; // both index the same source vector
         case RowGroup::User:    break;
         }
         return m_userOrig;
@@ -415,7 +425,7 @@ namespace ui
         // variable row holds the name (and the first entry), segment rows hold the rest.
         for (size_t i{0}; i < m_rows.size();)
         {
-            if (m_rows[i].group == RowGroup::Process) { ++i; continue; } // never written
+            if (IsProcessRow(m_rows[i].group)) { ++i; continue; } // never written
             if (m_rows[i].scope != scope) { ++i; continue; }
             const int unit{m_rows[i].unit}; // a variable's rows share a stable unit id
             const int vi{m_rows[i].varIndex};
@@ -1187,7 +1197,7 @@ namespace ui
             const bool focused = (i == m_selected);
             const bool hovered = (i == m_hover && !selected);
             const std::vector<bool>& sf{(r.scope == Environ::core::Scope::User) ? m_userStruct : m_machineStruct};
-            const bool varStruct{r.group != RowGroup::Process && r.varIndex >= 0
+            const bool varStruct{!IsProcessRow(r.group) && r.varIndex >= 0
                                  && r.varIndex < static_cast<int>(sf.size())
                                  && sf[static_cast<size_t>(r.varIndex)]};
             const bool valueDirty = (r.col2 != r.original) || varStruct;
@@ -1212,12 +1222,18 @@ namespace ui
                                   brush, s.rowInvalid.borderWidth);
             }
 
+            // Read-only rows split two ways: inherited-from-parent gets its own color, everything
+            // else read-only (session vars, machine vars when unelevated) shares readonlyText.
+            const D2D1_COLOR_F roText{r.group == RowGroup::Inherited ? s.inheritedText
+                                                                    : s.readonlyText};
+
             // The name column reflects rename-dirty (not path state — the name isn't a path).
             D2D1_COLOR_F nameColor{s.row.text};
+            // No hover text color: hover is signalled by rowHover.fill. Recoloring text on hover
+            // would flip an editable row off its base0D hue, reading as a state change.
             if (nameDirty)       nameColor = s.rowDirty.text;
             else if (selected)   nameColor = s.rowSelected.text;
-            else if (r.readOnly) nameColor = s.readonlyText;
-            else if (hovered)    nameColor = s.rowHover.text;
+            else if (r.readOnly) nameColor = roText;
 
             // The value column reflects the (first) path segment's state.
             // Dirty/invalid win over selection so a just-committed (still-selected) row
@@ -1227,8 +1243,7 @@ namespace ui
             else if (valueDirty)  valueColor = s.rowDirty.text;
             else if (selected)    valueColor = s.rowSelected.text;
             else if (r.duplicate) valueColor = s.rowDuplicate.text;
-            else if (r.readOnly)  valueColor = s.readonlyText;
-            else if (hovered)     valueColor = s.rowHover.text;
+            else if (r.readOnly)  valueColor = roText;
 
             if (focused)
             {
@@ -1248,9 +1263,10 @@ namespace ui
                 const float iconW{18.0f * m_zoom};
                 if (fonts.glyph)
                 {
-                    const wchar_t g{r.group == RowGroup::Process ? kGlyphProcess
-                                    : r.group == RowGroup::Machine ? kGlyphMachine
-                                                                   : kGlyphUser};
+                    const wchar_t g{r.group == RowGroup::Process     ? kGlyphProcess
+                                    : r.group == RowGroup::Inherited ? kGlyphInherited
+                                    : r.group == RowGroup::Machine   ? kGlyphMachine
+                                                                     : kGlyphUser};
                     DrawString(rt, brush, std::wstring(1, g), fonts.glyph,
                                D2D1::RectF(rowRect.left + kPad, y, rowRect.left + kPad + iconW, y + m_rowH),
                                nameColor);

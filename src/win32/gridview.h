@@ -61,11 +61,13 @@ public:
     void RefreshEditBrush();
     void RefreshEditFont(const ViewContext& ctx);
 
-    // Data count update (e.g. after snapshot restore / import). Process rows aren't shown in
-    // those views, so processCount defaults to 0 — resetting any stale count from a prior load.
-    void SetCounts(size_t userCount, size_t machineCount, size_t processCount = 0)
+    // Data count update (e.g. after snapshot restore / import). Process-env rows aren't shown in
+    // those views, so both counts default to 0 — resetting any stale count from a prior load.
+    void SetCounts(size_t userCount, size_t machineCount,
+                   size_t sessionCount = 0, size_t inheritedCount = 0)
     {
-        m_userCount = userCount; m_machineCount = machineCount; m_processCount = processCount;
+        m_userCount = userCount; m_machineCount = machineCount;
+        m_sessionCount = sessionCount; m_inheritedCount = inheritedCount;
     }
 
     // Where learned classifications are persisted (%LOCALAPPDATA%\environ\knowledge.toml).
@@ -130,7 +132,8 @@ private:
     // Data counts for footer
     size_t m_userCount{0};
     size_t m_machineCount{0};
-    size_t m_processCount{0};
+    size_t m_sessionCount{0};   // process-env vars Windows set at sign-in
+    size_t m_inheritedCount{0}; // process-env vars the launching process set
     bool   m_elevated{false};
 };
 

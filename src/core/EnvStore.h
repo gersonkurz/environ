@@ -40,6 +40,12 @@ struct EnvVariable {
     // post-pass; only ever true for KB-volatile, non-composed names (see docs/plan-process-scope.md).
     bool shadowed{false};
     std::wstring effective_value;
+
+    // Process-env extras only. False = Windows set it at sign-in (volatile or system-computed);
+    // true = the process that launched environ set it (a shell prompt, a dev command prompt,
+    // an activated venv). Inherited values are absent from an elevated relaunch, which the
+    // service starts from a fresh environment block rather than from our parent.
+    bool inherited{false};
 };
 
 // Read all environment variables from the given registry scope.
@@ -55,9 +61,12 @@ std::vector<EnvVariable> read_variables(Scope scope, const KnowledgeBase* kb = n
 // extras" (USERPROFILE, LOCALAPPDATA, ProgramFiles, ...). Pass the already-read persistent vars
 // to avoid re-reading the registry. Sorted by name. (Shadow detection for persistent names whose
 // effective value differs is a separate post-pass; see docs/plan-process-scope.md.)
+// If `kb` is non-null, each result's `inherited` flag is set from its volatile classification:
+// names Windows recomputes at sign-in are session values, everything else came from our parent.
 std::vector<EnvVariable> read_process_extras(
     std::vector<EnvVariable> const& userVars,
-    std::vector<EnvVariable> const& machineVars);
+    std::vector<EnvVariable> const& machineVars,
+    const KnowledgeBase* kb = nullptr);
 
 // Expand environment variable references and validate path segments.
 void expand_and_validate(std::vector<EnvVariable>& variables);

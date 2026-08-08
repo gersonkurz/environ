@@ -103,6 +103,9 @@ namespace ui
         bool SelectionShadowed() const;
         std::wstring SelectionEffectiveValue() const;
 
+        // Selection is a process-env row inherited from the launching process (not from Windows).
+        bool SelectionInherited() const;
+
         // Selected cell's current value text (col2), empty if no selection. Used to seed
         // the browse dialog.
         std::wstring SelectedValueText() const;
@@ -158,7 +161,14 @@ namespace ui
         // A variable "unit" (a Variable row plus its path-segment rows) is identified by a
         // stable per-unit id (Row::unit), NOT by scope/group + varIndex: Process rows carry a
         // dummy scope = User, and unsaved rows share varIndex == -1, so neither is a safe key.
-        enum class RowGroup { User, Machine, Process };
+        // Process splits in two: Process = set by Windows at sign-in, Inherited = set by the
+        // process that launched us (see EnvVariable::inherited). Both are display-only.
+        enum class RowGroup { User, Machine, Process, Inherited };
+
+        static constexpr bool IsProcessRow(RowGroup g)
+        {
+            return g == RowGroup::Process || g == RowGroup::Inherited;
+        }
 
         // Active global sort: rows from all groups merge into one list ordered by this
         // column/direction; the per-row scope glyph disambiguates origin.

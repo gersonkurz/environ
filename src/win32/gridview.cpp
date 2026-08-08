@@ -231,6 +231,11 @@ void ui::GridView::Paint(const ViewContext& ctx, const D2D1_RECT_F& bounds)
                 text = L"\x2139 Read-only \x2014 " + m_editNote; // shown after an edit attempt
                 color = s.rowInvalid.text;
             }
+            else if (m_grid.SelectionInherited())
+            {
+                text = L"\x2139 inherited"; // see README: gone after an elevated relaunch
+                color = s.inheritedText;
+            }
             else if (const std::wstring note{m_knowledge.note(name)}; !note.empty())
             {
                 text = L"\x2139 " + note; // U+2139 information source
@@ -390,8 +395,9 @@ std::wstring ui::GridView::GetStatusText(const ViewContext& ctx) const
 {
     const theme::ColorScheme& s{*ctx.scheme};
     std::wstring footer = std::format(
-        L"{}   \x2022   {} user, {} machine, {} process{}",
-        std::wstring(s.name.begin(), s.name.end()), m_userCount, m_machineCount, m_processCount,
+        L"{}   \x2022   {} user, {} machine, {} session, {} inherited{}",
+        std::wstring(s.name.begin(), s.name.end()), m_userCount, m_machineCount,
+        m_sessionCount, m_inheritedCount,
         m_elevated ? L"" : L"  (machine read-only)");
     if (m_grid.HasFilter())
         footer += std::format(L"   \x2022   {} shown (filtered)", m_grid.FilteredRowCount());
@@ -413,7 +419,7 @@ void ui::GridView::LoadData(bool elevated)
 
     // Read-only "process extras" — the effective env vars Windows sets (USERPROFILE,
     // LOCALAPPDATA, ProgramFiles, ...) that aren't persistent User/Machine values.
-    std::vector<EnvVariable> processVars{read_process_extras(userVars, machineVars)};
+    std::vector<EnvVariable> processVars{read_process_extras(userVars, machineVars, &m_knowledge)};
 
     // Learn folder/file/path-list classifications by probing values on disk, then persist
     // the newly-learned ones so the knowledge base — not a per-paint disk probe — drives
@@ -433,7 +439,9 @@ void ui::GridView::LoadData(bool elevated)
 
     m_userCount = userVars.size();
     m_machineCount = machineVars.size();
-    m_processCount = processVars.size();
+    m_inheritedCount = static_cast<size_t>(
+        std::ranges::count_if(processVars, [](const EnvVariable& v) { return v.inherited; }));
+    m_sessionCount = processVars.size() - m_inheritedCount;
     m_grid.SetData(userVars, machineVars, processVars, m_elevated);
 }
 
