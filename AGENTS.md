@@ -9,7 +9,8 @@ Assets and configuration live at the repository root and supporting folders: `th
 Use a Visual Studio Developer Command Prompt or another shell where `msbuild` is on `PATH`.
 
 - `just build` builds Debug for the native architecture.
-- `just release` builds Release for the native architecture.
+- `just build-release` builds Release for the native architecture. (`just release` is the
+  installer/packaging recipe, not a compile.)
 - `just build-all` builds Debug and Release for x64 and ARM64.
 - `just run` builds Debug and launches `bin\<platform>\Debug\environ.exe`.
 - `just clean` removes `bin/` and `temp/`.
@@ -22,7 +23,7 @@ Use modern C++20 where it clarifies the code. Prefer uniform initialization (`in
 Painting code must read colors and fonts through the theme table. Do not hardcode visual constants that belong in `theme.*`.
 
 ## Testing Guidelines
-There is no automated application test suite yet. The current quality gate is a clean build at `/W4 /WX` with zero warnings. For UI changes, verify light and dark Base16 themes, DPI scaling, and unelevated behavior when machine variables are touched. Dependency tests under `extern/` belong to those libraries, not the app.
+There is no automated application test suite yet. The current quality gate is a clean build at `/W4` with zero warnings (`/WX` is not set — read the build output, the exit code won't tell you). For UI changes, verify light and dark Base16 themes, DPI scaling, and unelevated behavior when machine variables are touched. Dependency tests under `extern/` belong to those libraries, not the app.
 
 ## Commit & Pull Request Guidelines
 Commit history uses short, plain-English summaries such as `Add TOML export/import of environment variables`. Keep messages focused on what changed and why; do not add AI attribution.
