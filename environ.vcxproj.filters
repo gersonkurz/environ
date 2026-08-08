@@ -74,6 +74,9 @@
     <ClInclude Include="src\win32\themeselectionview.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\win32\fontselectionview.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="environ.rc">
@@ -122,6 +125,7 @@
     <ClCompile Include="src\win32\gridview.cpp" />
     <ClCompile Include="src\win32\historyview.cpp" />
     <ClCompile Include="src\win32\themeselectionview.cpp" />
+    <ClCompile Include="src\win32\fontselectionview.cpp" />
     <ClCompile Include="extern\sqlite3\src\sqlite3\sqlite3.c">
       <Filter>src\win32</Filter>
     </ClCompile>

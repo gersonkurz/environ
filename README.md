@@ -64,8 +64,13 @@ belongs on the operating system it runs on.
 Twenty built-in Base16 color schemes — Catppuccin, Gruvbox, Nord, Solarized, Tokyo Night,
 the Tomorrow family (including the gloriously blue *Tomorrow Night Blue*) and friends —
 grouped by light and dark, switched live. Fancy something else? Drop any Base16 `.yaml`
-into the `themes` folder and it shows up. Fonts, zoom (`Ctrl`+mouse-wheel), and horizontal
-scrolling for the truly cursed `PATH` are all adjustable.
+into the `themes` folder and it shows up. Zoom (`Ctrl`+mouse-wheel) and horizontal scrolling
+for the truly cursed `PATH` are adjustable too.
+
+**Font** picks the UI text family from everything installed on the machine. Like the theme
+picker it previews live — the whole window, list included, redraws in the candidate font as
+you arrow through it, so you judge the font by the app rather than by a sample box. `A`–`Z`
+jumps to a family, `Enter` keeps it, `Esc` puts back what you had.
 
 ## Session vs. inherited variables
 

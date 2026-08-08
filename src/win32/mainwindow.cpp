@@ -377,6 +377,38 @@ void ui::MainWindow::ApplyThemeChange()
     m_gridView.RefreshEditBrush();
 }
 
+void ui::MainWindow::ApplyFontChange()
+{
+    CreateFonts();
+    m_grid.SetZoom(m_zoom); // unchanged zoom, but it re-measures column widths for the new font
+    m_gridView.RefreshEditFont(MakeContext());
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void ui::MainWindow::CheckFontAction()
+{
+    // A selection (or a Cancel restore) rebuilds the text formats so the whole window —
+    // including the picker itself — repaints in the candidate family. Nothing is written to
+    // disk until Apply.
+    if (m_fontView.FontChanged())
+    {
+        m_fontView.ClearFontChanged();
+        m_settings.appearance.uiFont.set(pnq::unicode::to_utf8(m_fontView.SelectedFamily()));
+        ApplyFontChange();
+    }
+    const auto action{m_fontView.PendingAction()};
+    if (action == FontSelectionView::Action::None) return;
+    m_fontView.ClearPendingAction();
+
+    if (action == FontSelectionView::Action::Apply)
+        m_settings.save();
+    // Cancel: the view already restored the opening family through the FontChanged path
+    // above, so the in-memory setting is correct and there is nothing to persist.
+
+    m_eatNextDblClk = true;
+    SwitchToView(&m_gridView);
+}
+
 // --- Data / save ---
 
 void ui::MainWindow::LoadData()
@@ -774,6 +806,7 @@ std::vector<ui::MainWindow::NavItem> ui::MainWindow::NavItems() const
 {
     std::vector<NavItem> items{
         {L"Themes",  L"",       NavAction::Themes},
+        {L"Font",    L"",       NavAction::Fonts},
         {L"History", L"Ctrl+H", NavAction::History},
         {L"Save",    L"Ctrl+S", NavAction::Save},
         {L"Export\x2026", L"",  NavAction::Export},
@@ -822,6 +855,20 @@ void ui::MainWindow::HandleNavClick(int item)
         {
             if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
             SwitchToView(&m_themeView);
+        }
+        break;
+    case NavAction::Fonts:
+        if (m_activeView == &m_fontView)
+        {
+            // Toggling the picker closed via the nav keeps the live selection (no Apply
+            // here), matching Themes.
+            m_settings.save();
+            SwitchToView(&m_gridView);
+        }
+        else
+        {
+            if (m_grid.IsEditing()) m_gridView.OnEditEnd(ctx, true, false, false);
+            SwitchToView(&m_fontView);
         }
         break;
     case NavAction::History:
@@ -1219,6 +1266,7 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         Repaint(m_activeView->OnKey(ctx, static_cast<int>(wp)));
         CheckHistoryAction();
         CheckThemeAction();
+        CheckFontAction();
         return 0;
     }
     case WM_MOUSEMOVE:
@@ -1317,6 +1365,7 @@ LRESULT ui::MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         Repaint(m_activeView->OnLButtonDown(ctx, xDip, yDip, shift, ctrl));
         CheckHistoryAction();
         CheckThemeAction();
+        CheckFontAction();
         return 0;
     }
     case WM_LBUTTONUP:

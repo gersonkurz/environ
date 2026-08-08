@@ -5,6 +5,7 @@
 #include "gridview.h"
 #include "historyview.h"
 #include "themeselectionview.h"
+#include "fontselectionview.h"
 #include "AppSettings.h"
 #include "EnvStore.h"
 #include "EnvWriter.h"
@@ -81,7 +82,7 @@ private:
     void PaintMsgBox(const theme::ColorScheme& s, const D2D1_SIZE_F& sz);
 
     // Nav panel
-    enum class NavAction { Themes, History, Save, Export, Import, RunAsAdmin, About, Exit };
+    enum class NavAction { Themes, Fonts, History, Save, Export, Import, RunAsAdmin, About, Exit };
     struct NavItem { const wchar_t* label; const wchar_t* hint; NavAction action; };
     std::vector<NavItem> NavItems() const; // dynamic: RunAsAdmin only appears when unelevated
     int  NavItemAt(float x, float y, const D2D1_SIZE_F& sz) const;
@@ -105,6 +106,10 @@ private:
     void ApplyHistoryRestore();
     void CheckThemeAction();
     void ApplyThemeChange();
+    void CheckFontAction();
+    // Rebuild every text format from the current settings and re-measure anything sized by
+    // them. Shared by the font picker and the zoom/DPI paths.
+    void ApplyFontChange();
 
     // Review layout
     ReviewGeom ReviewLayout(const D2D1_SIZE_F& sz);
@@ -134,6 +139,7 @@ private:
     GridView            m_gridView{m_grid, m_theme, m_knowledge};
     HistoryView         m_historyView{m_snapshots};
     ThemeSelectionView  m_themeView{m_theme};
+    FontSelectionView   m_fontView;
     View*               m_activeView{&m_gridView};
 
     // Nav panel

@@ -322,6 +322,7 @@
     <ClInclude Include="src\win32\view.h" />
     <ClInclude Include="src\win32\theme.h" />
     <ClInclude Include="src\win32\themeselectionview.h" />
+    <ClInclude Include="src\win32\fontselectionview.h" />
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
@@ -362,6 +363,7 @@
     <ClCompile Include="src\win32\historyview.cpp" />
     <ClCompile Include="src\win32\theme.cpp" />
     <ClCompile Include="src\win32\themeselectionview.cpp" />
+    <ClCompile Include="src\win32\fontselectionview.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
