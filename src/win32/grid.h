@@ -63,6 +63,9 @@ namespace ui
         std::optional<EditTarget> BeginEditName();         // edit the name cell (after AddVariable)
         std::optional<EditTarget> BeginEditAt(float x, float y); // select + edit the row under a point
         bool SelectNextEditable(int dir);                  // Tab: move to next/prev editable row
+        // Selection is a variable row (name + value), not a bare path segment (value only).
+        // Tab uses this to know whether the row has a name cell to stop at.
+        bool SelectionHasNameCell() const;
         void CommitEdit(const std::wstring& text);         // write back + mark dirty
         void CancelEdit();
 

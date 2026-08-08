@@ -449,12 +449,24 @@ void ui::GridView::OnEditEnd(const ViewContext& ctx, bool commit, bool tab, bool
 {
     const bool wasName{m_grid.IsEditingName()};
     EndEdit(commit);
-    if (tab)
+    if (!tab) return;
+
+    // Each row's cells are [name] then value; a bare path segment has no name cell. Tab walks
+    // that sequence, so entering a row lands on its name rather than skipping straight to the
+    // value of the row after it.
+    if (!shift)
     {
-        if (wasName && !shift) // forward Tab from name -> edit value of same row
-            BeginEditFromGrid(ctx);
-        else if (m_grid.SelectNextEditable(shift ? -1 : 1))
-            BeginEditFromGrid(ctx);
+        if (wasName) { BeginEditFromGrid(ctx); return; } // name -> value, same row
+        if (!m_grid.SelectNextEditable(1)) return;
+        if (m_grid.SelectionHasNameCell()) BeginEditNameFromGrid(ctx);
+        else                               BeginEditFromGrid(ctx);
+    }
+    else
+    {
+        // Mirror image: value -> name of the same row, then back into the previous row's value
+        // (always its last cell).
+        if (!wasName && m_grid.SelectionHasNameCell()) { BeginEditNameFromGrid(ctx); return; }
+        if (m_grid.SelectNextEditable(-1)) BeginEditFromGrid(ctx);
     }
 }
 

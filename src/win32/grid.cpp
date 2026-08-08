@@ -1127,6 +1127,12 @@ namespace ui
         return false;
     }
 
+    bool Grid::SelectionHasNameCell() const
+    {
+        return HasSelection()
+            && m_rows[static_cast<size_t>(m_selected)].kind == Row::Kind::Variable;
+    }
+
     void Grid::EnsureVisible(int row)
     {
         const float viewH = m_bounds.bottom - m_bounds.top - m_headerH;
