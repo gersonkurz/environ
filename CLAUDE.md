@@ -125,3 +125,12 @@ just release           # both per-arch MSIs + the cross-arch bundle exe (= packa
   messages are plain English: what changed and why, nothing else.
 - Let `AGENTS.md` drift. It's a condensed restatement of this file for other agents; if you
   change a build command or a rule here, mirror it there.
+
+## Review loop
+
+@C:/Projects/yaaadabi/protocol.md
+
+Loop parameters:
+- Verify: <build command> && <test command>
+- Yardstick docs: <the docs that define "best" for this repo>
+- Review focus: <what this codebase is most at risk of>
