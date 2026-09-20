@@ -37,7 +37,7 @@ struct EnvVariable {
 
     // A persistent (User/Machine) variable whose effective value is overridden by Windows at
     // sign-in (shadowed). `effective_value` holds the value actually in effect. Set by a
-    // post-pass; only ever true for KB-volatile, non-composed names (see docs/plan-process-scope.md).
+    // post-pass; only ever true for KB-volatile, non-composed names.
     bool shadowed{false};
     std::wstring effective_value;
 
@@ -60,7 +60,7 @@ std::vector<EnvVariable> read_variables(Scope scope, const KnowledgeBase* kb = n
 // are NOT already represented by an effective User/Machine row — the read-only "process-env
 // extras" (USERPROFILE, LOCALAPPDATA, ProgramFiles, ...). Pass the already-read persistent vars
 // to avoid re-reading the registry. Sorted by name. (Shadow detection for persistent names whose
-// effective value differs is a separate post-pass; see docs/plan-process-scope.md.)
+// effective value differs is a separate post-pass.)
 // If `kb` is non-null, each result's `inherited` flag is set from its volatile classification:
 // names Windows recomputes at sign-in are session values, everything else came from our parent.
 std::vector<EnvVariable> read_process_extras(
