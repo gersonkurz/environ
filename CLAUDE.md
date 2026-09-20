@@ -17,8 +17,23 @@ starts instantly.
 
 - **`src/win32/`** — the host. Window + message loop, the grid control, `theme.*`.
   **This is where UI work goes.**
-- **`src/core/`** — plain C++20 logic (`Environ::core`). No Win32/UI, no WinRT. **Stays.**
-  Reused unchanged by the new host.
+- **`src/core/`** — the logic (`Environ::core`). Calls Win32 system APIs (registry, environment,
+  files); no application UI, no WinRT. **Stays.** Reused unchanged by the new host.
+
+## Working agreement
+Work is tracked as **GitHub issues** in `gersonkurz/environ`; `gh` is installed and logged in.
+
+1. **Open the issue before writing code, and assign it.** One issue per task, however small.
+   `gh issue create --assignee gersonkurz`.
+2. **Comment decisions onto the issue as they are made.** The issue — not a chat transcript —
+   is the record of what the three of us (human, implementer, Codex) decided and why,
+   including the alternatives that were rejected.
+3. **Two review gates, in this order.** Codex reviews first (see *Review loop* at the bottom);
+   its APPROVED is necessary but not sufficient. Then **the human reviews and says commit**.
+   Nothing is committed before that: the point of this cleanup is that *he* understands the
+   result, and a commit he hasn't read defeats it.
+4. **The commit closes the issue**: plain-English message (see *Do not*), with a `Fixes #<n>`
+   line. No AI attribution.
 
 ## Build & run
 Must run from a **VS 2026 Developer shell** — the justfile hard-fails unless
@@ -81,8 +96,22 @@ just release           # both per-arch MSIs + the cross-arch bundle exe (= packa
   user override). Drives the detail-strip description and the folder/file browse picker.
 
 ### Boundaries & known facts
-- **Two-layer rule:** no business logic in `src/win32/`; no Win32/UI/WinRT types in
-  `src/core/`. If you're writing path validation in window code, you're doing it wrong.
+- **Two-layer rule:** no business logic in `src/win32/`; **no application UI** in `src/core/`.
+  If you're writing path validation in window code, you're doing it wrong.
+- **Core is a Win32 component** and calls the Win32 API freely — registry, environment, files,
+  and system notifications: `Environ::core::broadcast_environment_change()` (in `EnvWriter.cpp`)
+  does `SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, …)`, a system service, not UI.
+  What core must not do is depend on *this application's* UI: no window creation, no message
+  loop, no message handling, no rendering, view or theme type.
+- **Headless is the point of that rule, and today it is unenforced.** There is no test harness,
+  `just build` does not check it, and merely linking core into a console executable would not
+  prove it either. When the harness exists it must exercise core without creating a window or
+  running a message loop.
+- **A `View` paints and routes input, and that is all.** Anything that *decides* — what a click
+  means for the data, whether a row is in an error state, where the selection goes next —
+  belongs in a plain C++ object with no `HWND` anywhere near it. Not MVC, and no Controller
+  class per view: the test is whether the decision can be reached from a unit test with no
+  window on screen.
 - Namespace is `Environ::core`, NOT `environ::core` — MSVC's CRT defines `environ` as a macro.
 - pnq uses `std::string` (UTF-8); the core boundary uses `std::wstring`; convert with
   `pnq::unicode::to_utf16()`.
@@ -94,12 +123,32 @@ just release           # both per-arch MSIs + the cross-arch bundle exe (= packa
   in our code unless absolutely needed.
 
 ## Code style
-- C++20: concepts, ranges, `std::format`, structured bindings where they clarify — not to show off.
+- C++20: concepts, ranges, structured bindings where they clarify — not to show off.
 - Uniform initializers everywhere: `int x{42}`, not `int x = 42` and not `int x(42)`.
 - No raw owning pointers — `std::unique_ptr` (pimpl `unique_ptr<Impl>` needs its dtor in the
   `.cpp`). COM objects RAII-owned or explicitly released.
 - Use `gersonkurz/pnq` where it covers the need; don't reimplement what's there.
-- spdlog for all logging. No `OutputDebugString`, `printf`, or `std::cout` in production paths.
+- **Formatting is `fmt::format` (fmtlib, vendored from GitHub) — not `std::format`**, and not
+  the copy bundled inside spdlog. spdlog is built with `SPDLOG_FMT_EXTERNAL` against that same
+  fmt; `SPDLOG_USE_STD_FORMAT` must not be defined anywhere, the two are mutually exclusive.
+  pnq's own headers format with `std::format` internally — that is fine and stays as it is;
+  we don't touch pnq. Existing code does not comply yet; migration is issue #4.
+- **Readability is the yardstick, and `extern/pnq` is what readable looks like here.** One job
+  per function, named so the call site reads as a sentence; a `///` line above anything public
+  saying what it does, with `@param`/`@return` where the answer isn't obvious; Allman braces;
+  no function you need a scrollbar to read. In doubt, open a pnq header and match it.
+- **Log through pnq, never `spdlog::` directly** — that indirection is what lets us swap the
+  backend (`PNQ_USE_QUILL`). Ordinary messages go through the macros in `pnq/log.h`
+  (`PNQ_LOG_INFO`, `PNQ_LOG_WARN`, `PNQ_LOG_ERROR`, …); `pnq/logging.h` supplies setup
+  (`initialize_logging`, `reconfigure_logging_for_file`) and the Windows-error helpers. No
+  `OutputDebugString`, `printf`, or `std::cout` in production paths. The existing code does not
+  comply yet; migration is issue #2.
+- **A failure log that doesn't say why is a bug.** `spdlog::error("D2D1CreateFactory failed")`
+  tells the reader nothing at 3am. Log the decoded error:
+  `pnq::logging::report_windows_error("D2DWindow::InitGraphics", hr, "D2D1CreateFactory")`,
+  which runs the code through `pnq::windows::hresult_as_string`. Same rule for
+  `GetLastError()`. Every `FAILED(...)` and every `!ok` branch says which call failed and
+  with what.
 - If unsure something is correct, leave `// TODO(review): <specific question>`.
 
 ## What "done" means
@@ -131,6 +180,14 @@ just release           # both per-arch MSIs + the cross-arch bundle exe (= packa
 @C:/Projects/yaaadabi/protocol.md
 
 Loop parameters:
-- Verify: <build command> && <test command>
-- Yardstick docs: <the docs that define "best" for this repo>
-- Review focus: <what this codebase is most at risk of>
+- Verify: `just build` — clean at `/W4` with **zero warnings**; read the output, `/WX` is not
+  set so msbuild exits 0 with warnings anyway. `just test` joins this line once a test target
+  exists; there is none today.
+- Yardstick docs: this file, `AGENTS.md`, `docs/architecture.md` (the target boundaries),
+  `docs/ROADMAP.md` (the phases), and `extern/pnq` as the readability reference.
+- Review focus: readability and structure — headers that mix concerns, one giant switch where
+  named handlers belong, unchecked Win32/COM return values, logs that report a failure without
+  its reason, magic numbers in painting code, decisions trapped in UI code where no test can
+  reach them, and text-encoding discipline at the boundaries.
+- Task list: GitHub issues in `gersonkurz/environ` — `[task]` findings are filed with
+  `gh issue create`, one per finding.

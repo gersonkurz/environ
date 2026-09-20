@@ -1,9 +1,16 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Environ is a Windows 11 environment-variable editor built with pure Win32, Direct2D, DirectWrite, C++20, and MSVC. Main application code lives in `src/`: `src/win32/` owns the UI host, views, grid, theme selection, and painting; `src/core/` owns environment-variable logic, settings, snapshots, import/export, and knowledge-base behavior. Keep business logic out of `src/win32/`, and keep Win32/UI types out of `src/core/`.
+Environ is a Windows 11 environment-variable editor built with pure Win32, Direct2D, DirectWrite, C++20, and MSVC. Main application code lives in `src/`: `src/win32/` owns the UI host, views, grid, theme selection, and painting; `src/core/` owns environment-variable logic, settings, snapshots, import/export, and knowledge-base behavior. Keep business logic out of `src/win32/`, and keep the **application's UI** out of `src/core/` — core calls Win32 system APIs freely (registry, environment, files, and the `WM_SETTINGCHANGE` broadcast in `Environ::core::broadcast_environment_change()`, a namespace-level function in `EnvWriter.cpp`), but creates no window, owns no message loop, handles no message, and names no rendering/view/theme type. The goal is that core can be exercised headless; no harness exists yet, so today this is a design requirement rather than an enforced gate.
 
 Assets and configuration live at the repository root and supporting folders: `themes/` contains Base16 YAML theme files, `knowledge.toml` ships variable metadata, `docs/` holds project planning, `setup/` contains installer scripts, and `extern/` contains vendored/submodule dependencies.
+
+## Working Agreement
+Work is tracked as GitHub issues in `gersonkurz/environ` (`gh` is installed and logged in).
+Open and assign the issue before writing code (`gh issue create --assignee gersonkurz`),
+comment the decisions onto it as they are made, and close it with the commit (`Fixes #<n>`).
+Two review gates, in order: Codex reviews first, then the human reviews and says commit.
+Nothing is committed before the human has read it.
 
 ## Build, Test, and Development Commands
 Use a Visual Studio Developer Command Prompt or another shell where `msbuild` is on `PATH`.
@@ -18,7 +25,13 @@ Use a Visual Studio Developer Command Prompt or another shell where `msbuild` is
 Direct build example: `msbuild environ.vcxproj /p:Configuration=Debug /p:Platform=x64 /m`.
 
 ## Coding Style & Naming Conventions
-Use modern C++20 where it clarifies the code. Prefer uniform initialization (`int count{0}`), RAII ownership, `std::unique_ptr` for owning pointers, and explicit lifetime management for COM resources. Project code should remain exception-free; use return values, `HRESULT`, or `std::optional` instead of `throw`/`catch`. Log with `spdlog`; avoid `printf`, `std::cout`, and `OutputDebugString` in production paths.
+Use modern C++20 where it clarifies the code. Prefer uniform initialization (`int count{0}`), RAII ownership, `std::unique_ptr` for owning pointers, and explicit lifetime management for COM resources. Project code should remain exception-free; use return values, `HRESULT`, or `std::optional` instead of `throw`/`catch`. Format with `fmt::format` (vendored fmtlib), not `std::format` and not spdlog's bundled copy; spdlog is built with `SPDLOG_FMT_EXTERNAL` and `SPDLOG_USE_STD_FORMAT` must not be defined. Existing code does not comply yet; that migration is issue #4.
+
+Readability is the yardstick, and `extern/pnq` is what readable looks like in this project: one job per function, names that read as a sentence at the call site, a `///` line above anything public, Allman braces, no function that needs a scrollbar. Match a pnq header when in doubt.
+
+Log through pnq, not `spdlog::` directly (the indirection is what allows swapping the backend): `PNQ_LOG_INFO`/`PNQ_LOG_ERROR`/... from `pnq/log.h` for ordinary messages, `pnq/logging.h` for setup and Windows-error helpers; avoid `printf`, `std::cout`, and `OutputDebugString` in production paths. A log that reports a failure without its reason is a bug — decode the HRESULT or `GetLastError()`, e.g. `pnq::logging::report_windows_error(context, hr, "D2D1CreateFactory")`. Existing code does not comply yet; that migration is issue #2.
+
+UI and logic stay separated: a `View` paints and routes input, and everything that *decides* lives in a plain C++ object with no `HWND` in reach, so a test can get at it without a window. Not MVC — the test is reachability from a unit test, not a class diagram.
 
 Painting code must read colors and fonts through the theme table. Do not hardcode visual constants that belong in `theme.*`.
 
