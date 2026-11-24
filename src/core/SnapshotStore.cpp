@@ -38,16 +38,19 @@ SnapshotStore::~SnapshotStore() = default;
 SnapshotStore::SnapshotStore(SnapshotStore&&) noexcept = default;
 SnapshotStore& SnapshotStore::operator=(SnapshotStore&&) noexcept = default;
 
-bool SnapshotStore::open() {
+bool SnapshotStore::open(const std::string& override_path) {
     m_impl = std::make_unique<Impl>();
 
-    auto path{database_path()};
-    if (path.empty()) {
-        spdlog::error("Failed to resolve database path");
-        return false;
+    std::string path_utf8{override_path};
+    if (path_utf8.empty()) {
+        auto path{database_path()};
+        if (path.empty()) {
+            spdlog::error("Failed to resolve database path");
+            return false;
+        }
+        path_utf8 = path.string();
     }
 
-    auto path_utf8{path.string()};
     if (!m_impl->db.open(path_utf8)) {
         spdlog::error("Failed to open database: {}", m_impl->db.last_error());
         return false;
@@ -171,7 +174,7 @@ std::vector<SnapshotInfo> SnapshotStore::list_snapshots() {
     pnq::sqlite::Statement stmt{m_impl->db,
         "SELECT id, timestamp, label, scope_mask FROM snapshots ORDER BY timestamp DESC;"};
 
-    if (stmt.execute()) {
+    if (stmt.execute() && !stmt.is_empty()) {
         do {
             result.push_back(SnapshotInfo{
                 .id{stmt.get_int64(0)},
@@ -194,7 +197,7 @@ std::vector<SnapshotVariable> SnapshotStore::load_snapshot(int64_t snapshot_id) 
         "FROM snapshot_variables WHERE snapshot_id = ?;"};
     stmt.bind(snapshot_id);
 
-    if (stmt.execute()) {
+    if (stmt.execute() && !stmt.is_empty()) {
         do {
             result.push_back(SnapshotVariable{
                 .scope{stmt.get_int32(0) == 0 ? Scope::User : Scope::Machine},

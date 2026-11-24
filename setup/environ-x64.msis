@@ -2,7 +2,7 @@
 <setup>
     <!-- Setup script uses MSIS - see https://github.com/gersonkurz/msis -->
     <set name="PRODUCT_NAME" value="environ x64"/>
-    <set name="PRODUCT_VERSION" value="1.2.0"/>
+    <set name="PRODUCT_VERSION" value="2.0.0"/>
     <set name="LANGUAGE" value="en-us"/>
     <set name="PLATFORM" value="x64"/>
     <set name="REPAIR_ENABLED" value="True"/>
@@ -12,8 +12,7 @@
     <set name="MANUFACTURER" value="https://github.com/gersonkurz/environ"/>
     <set name="INSTALLDIR" value="environ"/>
     <set name="ADD_TO_PATH" value="True"/>
-
-    <requires type="vcredist" version="2026"/>
+    <set name="REMOVE_FOLDERS_ON_UNINSTALL" value="False"/>
 
     <feature name="environ" enabled="yes" allowed="no">
         <files source="..\\dist\\stage\\x64" target="INSTALLDIR"/>

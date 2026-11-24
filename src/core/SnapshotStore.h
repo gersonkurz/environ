@@ -30,8 +30,8 @@ public:
     SnapshotStore(SnapshotStore&&) noexcept;
     SnapshotStore& operator=(SnapshotStore&&) noexcept;
 
-    // Opens or creates the database at %LOCALAPPDATA%\environ\environ.db.
-    bool open();
+    // Opens or creates the database at %LOCALAPPDATA%\environ\environ.db (or `override_path` if non-empty).
+    bool open(const std::string& override_path = {});
 
     // Create a snapshot from the given variables. Returns snapshot ID or -1.
     int64_t create_snapshot(

@@ -6,10 +6,9 @@ set windows-shell := ["cmd.exe", "/c"]
 
 project := "environ.vcxproj"
 
-# Map %PROCESSOR_ARCHITECTURE% to msbuild platform: AMD64 → x64, ARM64 → ARM64
-_arch := env_var_or_default("PROCESSOR_ARCHITECTURE", "AMD64")
-platform := if _arch == "ARM64" { "ARM64" } else { "x64" }
-platform_suffix := if _arch == "ARM64" { "arm64" } else { "x64" }
+# Detect native platform accurately even under x64 emulation on ARM64.
+platform := `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\native-platform.ps1`
+platform_suffix := if platform == "ARM64" { "arm64" } else { "x64" }
 
 # Default: show available recipes
 default:
@@ -22,10 +21,18 @@ default:
 _require-devshell:
     @if not "%VisualStudioVersion%"=="18.0" (echo. & echo ERROR: This needs a Visual Studio 2026 Developer shell. & echo Open "Developer Command Prompt for VS 2026" or "Developer PowerShell for VS 2026", then retry. & echo Expected VisualStudioVersion=18.0 but found "%VisualStudioVersion%". & exit /b 1)
 
+# Restore NuGet packages (WinAppSDK 1.8, CppWinRT, SDK BuildTools)
+restore:
+    nuget restore packages.config -PackagesDirectory packages
+
 # Run MSBuild for one configuration/platform.
 [private]
 _msbuild configuration platform: _require-devshell
-    msbuild {{project}} /p:Configuration={{configuration}} /p:Platform={{platform}} /m /nologo /v:minimal
+    msbuild {{project}} /p:Configuration={{configuration}} /p:Platform={{platform}} /m:2 /nr:false /nologo /v:minimal
+
+# Build and run headless core tests (/W4 /WX)
+test: _require-devshell
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run-tests.ps1
 
 # Build Debug (native arch)
 build: (_msbuild "Debug" platform)
@@ -42,8 +49,12 @@ run: build
 
 # --- Packaging (MSIS 3.x) ---
 
-# Build the release installers: both MSIs plus the cross-arch bundle executable.
-release: package-all bundle
+# Verify staged payloads, PE headers, VC145 CRT, MSIs, and bundle.
+verify:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-release.ps1
+
+# Build the release installers: both MSIs plus the cross-arch bundle executable, then verify.
+release: package-all bundle verify
 
 # Build the MSI for the native arch.
 package: (_stage platform "Release") (_stage_symbols platform "Release") (_package "environ-" + platform_suffix + ".msis")

@@ -19,8 +19,8 @@ struct AppSettings : public Section {
     {
     }
 
-    void load();
-    void save();
+    void load(const std::string& override_path = {});
+    bool save(const std::string& override_path = {});
 
     struct WindowSettings : public Section {
         WindowSettings(Section* parent)
@@ -55,6 +55,7 @@ struct AppSettings : public Section {
 
 private:
     std::unique_ptr<pnq::config::TomlBackend> m_backend;
+    std::string m_path;
 
     static std::string config_path();
 };

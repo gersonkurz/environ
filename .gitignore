@@ -3,6 +3,7 @@ build/
 temp/
 bin/
 dist/
+packages/
 
 # Logs and local artifacts
 *.log
