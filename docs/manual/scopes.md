@@ -9,10 +9,10 @@ or filter order:
 
 | Icon | Scope / Group | Editable? | Storage |
 | --- | --- | --- | --- |
-| 👤 | **User** | Always | `HKCU\Environment` |
-| 🖥 | **Machine** | When elevated (`Administrator`) | `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment` |
-| 🔒 | **Session** | Read-only | Computed by Windows at sign-in (`USERPROFILE`, `LOCALAPPDATA`, `ProgramFiles`, …) |
-| ▶ | **Inherited** | Read-only | Set by the process that launched Environ (shell prompt, Developer Command Prompt, Python venv, Windows Terminal) |
+| <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-label="User"><circle cx="8" cy="5" r="2.6"/><path d="M3 13.5c.6-2.4 2.4-3.7 5-3.7s4.4 1.3 5 3.7"/></svg> | **User** | Always | `HKCU\Environment` |
+| <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-label="Machine"><rect x="2" y="2.5" width="12" height="8.5" rx="1.2"/><path d="M5.5 13.5h5M8 11v2.5"/></svg> | **Machine** | When elevated (`Administrator`) | `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment` |
+| <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-label="Session"><rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg> | **Session** | Read-only | Computed by Windows at sign-in (`USERPROFILE`, `LOCALAPPDATA`, `ProgramFiles`, …) |
+| <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-label="Inherited"><rect x="2" y="2.5" width="12" height="11" rx="1.2"/><path d="M4.8 6.2 7 8 4.8 9.8M8.3 9.8h3"/></svg> | **Inherited** | Read-only | Set by the process that launched Environ (shell prompt, Developer Command Prompt, Python venv, Windows Terminal) |
 
 ### Why inherited variables disappear when you click "Run as administrator"
 
