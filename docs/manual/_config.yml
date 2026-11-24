@@ -1,0 +1,10 @@
+# GitHub Pages (Jekyll) settings for the Environ user manual.
+# Only docs/manual is published (see .github/workflows/manual.yml).
+title: Environ Manual
+description: A modern Windows 11 environment-variable editor.
+theme: jekyll-theme-primer
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: false
